@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
-from pynput import keyboard
+from pynput import keyboard #type: ignore
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from rich.console import Console
