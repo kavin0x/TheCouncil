@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Council — A Mixture-of-Experts debate system powered by xAI Grok.
+Council — A Mixture-of-Experts debate system powered by OpenRouter (Grok).
 
 Round structure:
   1       Independent Takes — async parallel, no cross-knowledge
@@ -41,8 +41,8 @@ from rich.theme import Theme
 
 load_dotenv()
 
-MODEL = "grok-4.20-multi-agent-beta-0309"
-API_BASE = "https://api.x.ai/v1"
+MODEL = "x-ai/grok-4.20-multi-agent-beta:online"
+API_BASE = "https://openrouter.ai/api/v1"
 DEFAULT_CONFIG = Path(__file__).parent / "agents.yaml"
 
 AGENT_COLORS = {
@@ -69,6 +69,7 @@ class Agent:
     role: str
     system_prompt: str
     color: str = "cyan"
+    model: str | None = None  # OpenRouter model; if unset, uses session.model
 
     @property
     def rich_color(self) -> str:
@@ -102,6 +103,7 @@ PERSUASION_NARRATIVE = " In private messages you may only sway others with logic
 class DebateSession:
     question: str
     agents: list[Agent]
+    model: str = MODEL
     rounds: list[list[AgentResponse]] = field(default_factory=list)
     dms: list[DM] = field(default_factory=list)
     inbox: dict[str, list[tuple[str, str]]] = field(
@@ -125,6 +127,7 @@ def load_config(config_path: Path) -> tuple[list[Agent], dict, dict]:
             role=a["role"],
             system_prompt=textwrap.dedent(a["system_prompt"]).strip(),
             color=a.get("color", "cyan"),
+            model=a.get("model"),
         )
         for a in raw.get("agents", [])
     ]
@@ -132,19 +135,26 @@ def load_config(config_path: Path) -> tuple[list[Agent], dict, dict]:
 
 
 def build_client() -> AsyncOpenAI:
-    api_key = os.getenv("XAI_API_KEY")
+    api_key = os.getenv("OPENROUTER_API_KEY")
     if not api_key:
         console.print(
             Panel(
-                "[bold red]XAI_API_KEY not set.[/]\n"
+                "[bold red]OPENROUTER_API_KEY not set.[/]\n"
                 "Add it to [bold].env[/] or export it:\n"
-                "  [dim]export XAI_API_KEY=your_key_here[/]",
+                "  [dim]export OPENROUTER_API_KEY=your_key_here[/]",
                 title="Missing API Key",
                 border_style="red",
             )
         )
         sys.exit(1)
-    return AsyncOpenAI(api_key=api_key, base_url=API_BASE)
+    return AsyncOpenAI(
+        api_key=api_key,
+        base_url=API_BASE,
+        default_headers={
+            "HTTP-Referer": "https://github.com/TheCouncil",
+            "X-Title": "TheCouncil",
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -234,13 +244,13 @@ async def api_call(
     client: AsyncOpenAI,
     input_msgs: list[dict],
     max_tokens: int = 1024,
+    model: str | None = None,
 ) -> str:
     """Non-streaming async call. Returns full output text."""
     response = await client.responses.create(
-        model=MODEL,
+        model=model or MODEL,
         input=input_msgs,
         max_output_tokens=max_tokens,
-        tools=[{"type": "web_search"}],
     )
     return response.output_text or ""
 
@@ -249,14 +259,14 @@ async def api_stream(
     client: AsyncOpenAI,
     input_msgs: list[dict],
     max_tokens: int = 1024,
+    model: str | None = None,
 ) -> str:
     """Streaming async call — prints tokens live. Use only in sequential context."""
     collected: list[str] = []
     async with client.responses.stream(
-        model=MODEL,
+        model=model or MODEL,
         input=input_msgs,
         max_output_tokens=max_tokens,
-        tools=[{"type": "web_search"}],
     ) as stream:
         async for event in stream:
             if event.type == "response.output_text.delta":
@@ -409,7 +419,8 @@ async def _attempt_dm(
             f"{dm_prompt}{notepad_ctx}"
         )},
     ]
-    raw = await api_call(client, input_msgs, max_tokens=120)
+    model = agent.model or session.model
+    raw = await api_call(client, input_msgs, max_tokens=120, model=model)
     _parse_and_update_notepad(raw, agent.name, session)
     return _parse_single_dm(raw, agent, session, round_num)
 
@@ -436,7 +447,8 @@ async def _dm_only_round(
         )},
     ]
     # 4 agents × (header + 50-word message) = ~120 tokens each, 480 max for all DMs
-    raw = await api_call(client, input_msgs, max_tokens=480)
+    model = agent.model or session.model
+    raw = await api_call(client, input_msgs, max_tokens=480, model=model)
     _parse_and_update_notepad(raw, agent.name, session)
     return _parse_multi_dm(raw, agent, session, 4)
 
@@ -463,7 +475,8 @@ async def _agent_round1(
             f"{inbox_ctx}{notepad_ctx}"
         )},
     ]
-    raw_content = await api_call(client, input_msgs)
+    model = agent.model or session.model
+    raw_content = await api_call(client, input_msgs, model=model)
     content = _parse_and_update_notepad(raw_content, agent.name, session)
     response = AgentResponse(agent=agent, round_num=1, content=content)
 
@@ -513,8 +526,9 @@ async def _agent_cross_debate(
         )},
     ]
 
+    model = agent.model or session.model
     start = time.monotonic()
-    raw_content = await api_stream(client, input_msgs)
+    raw_content = await api_stream(client, input_msgs, model=model)
     content = _parse_and_update_notepad(raw_content, agent.name, session)
     elapsed = time.monotonic() - start
     console.print(f"[dim]└─ {agent.name} finished in {elapsed:.1f}s[/]")
@@ -570,8 +584,9 @@ async def _agent_tiebreaker_debate(
         )},
     ]
 
+    model = agent.model or session.model
     start = time.monotonic()
-    raw_content = await api_stream(client, input_msgs)
+    raw_content = await api_stream(client, input_msgs, model=model)
     content = _parse_and_update_notepad(raw_content, agent.name, session)
     elapsed = time.monotonic() - start
     console.print(f"[dim]└─ {agent.name} finished in {elapsed:.1f}s[/]")
@@ -767,7 +782,8 @@ async def _agent_propose_resolution(
         {"role": "system", "content": agent.system_prompt},
         {"role": "user", "content": user_content},
     ]
-    raw = await api_call(client, input_msgs, max_tokens=200)
+    model = agent.model or session.model
+    raw = await api_call(client, input_msgs, max_tokens=200, model=model)
     cleaned = _parse_and_update_notepad(raw, agent.name, session)
     return cleaned.strip()
 
@@ -801,7 +817,8 @@ async def _agent_vote_for_one_resolution(
         {"role": "system", "content": voter.system_prompt},
         {"role": "user", "content": user_content},
     ]
-    raw = await api_call(client, input_msgs, max_tokens=120)
+    model = voter.model or session.model
+    raw = await api_call(client, input_msgs, max_tokens=120, model=model)
     cleaned = _parse_and_update_notepad(raw, voter.name, session)
     return _parse_single_preference_vote(cleaned, valid_proposers)
 
@@ -811,14 +828,18 @@ async def _agent_vote_for_one_resolution(
 # ---------------------------------------------------------------------------
 
 async def run_council(question: str, config_path: Path) -> None:
-    agents, moderator_cfg, _ = load_config(config_path)
+    agents, moderator_cfg, settings = load_config(config_path)
     client = build_client()
 
     if not agents:
         console.print("[bold red]No agents defined in config.[/]")
         sys.exit(1)
 
-    session = DebateSession(question=question, agents=agents)
+    session = DebateSession(
+        question=question,
+        agents=agents,
+        model=settings.get("model", MODEL),
+    )
     _print_header(question, agents)
     console.print("[dim]Press Cmd+Shift+N to view agent notepads (macOS may require Accessibility permissions).[/]")
     console.print()

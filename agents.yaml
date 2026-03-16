@@ -1,11 +1,13 @@
 # Council — Agent Panel Configuration
 # Each agent has a name, role, and system_prompt defining its persona.
-# Add, remove, or customize agents freely. The moderator is built-in.
+# Optional: add "model" to assign a specific OpenRouter model to an agent.
+# If omitted, the agent uses settings.model. Example: model: "anthropic/claude-sonnet-4.6:online"
 
 agents:
   - name: "Security Architect"
     role: "Defensive Systems Designer"
     color: "blue"
+    model: "meta-llama/llama-4-scout:online"
     system_prompt: |
       You are the Security Architect on an expert council. Your identity:
 
@@ -30,6 +32,7 @@ agents:
       Be concise and to the point.
 
   - name: "Red Teamer"
+    model: "moonshotai/kimi-k2.5:online"
     role: "Offensive Security & Adversarial Thinker"
     color: "red"
     system_prompt: |
@@ -57,6 +60,7 @@ agents:
       Be concise and to the point.
 
   - name: "Pragmatist"
+    model: "anthropic/claude-sonnet-4.6:online"
     role: "Product & Shipping Realist"
     color: "green"
     system_prompt: |
@@ -85,6 +89,7 @@ agents:
       Be concise and to the point.
 
   - name: "Devil's Advocate"
+    model: "x-ai/grok-4.20-multi-agent-beta:online"
     role: "Consensus Challenger & Blind Spot Hunter"
     color: "yellow"
     system_prompt: |
@@ -113,6 +118,7 @@ agents:
       Be concise and to the point.
 
   - name: "Threat Intelligence Analyst"
+    model: "google/gemini-3-flash-preview:online"
     role: "Threat Landscape & Adversary Behavior"
     color: "magenta"
     system_prompt: |
@@ -140,6 +146,7 @@ agents:
       Be concise and to the point.
 
   - name: "Incident Response Lead"
+    model: "deepseek/deepseek-v3.2:online"
     role: "Detection, Containment & Forensics"
     color: "cyan"
     system_prompt: |
@@ -169,6 +176,7 @@ agents:
       Be concise and to the point.
 
   - name: "CEO"
+    model: "openai/gpt-5.4:online"
     role: "Growth, Revenue & Market Push"
     color: "gold"
     system_prompt: |
@@ -211,5 +219,24 @@ moderator:
 
 # Debate settings
 settings:
+  # OpenRouter model ID. Append :online for web search. Choose from models below or any OpenRouter model.
+  model: "x-ai/grok-4.20-multi-agent-beta:online"
   stream_cross_debate: true   # stream tokens live during sequential cross-debate rounds
   show_dm_indicators: true    # show sender → recipient for DMs (content stays private)
+
+# Available models (all with :online for web search). Use any as settings.model.
+models:
+  - id: "anthropic/claude-sonnet-4.6:online"
+
+  - id: "openai/gpt-5.4:online"
+
+  - id: "x-ai/grok-4.20-multi-agent-beta:online"
+
+  - id: "google/gemini-3-flash-preview:online"
+
+  - id: "deepseek/deepseek-v3.2:online"
+
+  - id: "moonshotai/kimi-k2.5:online"
+
+  - id: "meta-llama/llama-4-scout:online"
+
