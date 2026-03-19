@@ -23,14 +23,12 @@ import asyncio
 import os
 import sys
 import textwrap
-import threading
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
-from pynput import keyboard #type: ignore
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from rich.console import Console
@@ -41,9 +39,24 @@ from rich.theme import Theme
 
 load_dotenv()
 
-MODEL = "x-ai/grok-4.20-multi-agent-beta:online"
+MODEL = "x-ai/grok-4.20-multi-agent-beta"
 API_BASE = "https://openrouter.ai/api/v1"
+XAI_API_BASE = "https://api.x.ai/v1"
 DEFAULT_CONFIG = Path(__file__).parent / "agents.yaml"
+
+# Map OpenRouter x-ai model IDs to native XAI model IDs (for direct XAI API)
+XAI_MODEL_MAP = {
+    "x-ai/grok-4.20-multi-agent-beta": "grok-4.20-multi-agent-beta-0309",
+    "x-ai/grok-4.20-multi-agent-beta-0309": "grok-4.20-multi-agent-beta-0309",
+    "x-ai/grok-4": "grok-4-0709",
+    "x-ai/grok-4-0709": "grok-4-0709",
+    "x-ai/grok-4-1-fast-reasoning": "grok-4-1-fast-reasoning",
+    "x-ai/grok-4-1-fast-non-reasoning": "grok-4-1-fast-non-reasoning",
+    "x-ai/grok-4-fast-reasoning": "grok-4-fast-reasoning",
+    "x-ai/grok-4-fast-non-reasoning": "grok-4-fast-non-reasoning",
+    "x-ai/grok-3": "grok-3",
+    "x-ai/grok-3-mini": "grok-3-mini",
+}
 
 AGENT_COLORS = {
     "blue": "bold blue",
@@ -96,7 +109,7 @@ MAX_ROUNDS = 35
 TARGET_ROUNDS_RANGE = (20, 31)  # random 20–30 inclusive
 
 # Private persuasion only: agents sway each other in DMs using logic and earnest appeal (e.g. begging, pleading), not bribes.
-PERSUASION_NARRATIVE = " In private messages you may only sway others with logic and earnest appeal (e.g. begging, pleading for their vote). No bribes of any kind — no money, crypto, favors, or promises of resources. Nothing of monetary value."
+PERSUASION_NARRATIVE = "In private messages you may only sway others with logic and earnest appeal (e.g. begging, pleading for their vote). No bribes of any kind — no money, crypto, favors, or promises of resources. Nothing of monetary value. In addition to this, you can indimidate them"
 
 
 @dataclass
@@ -111,7 +124,6 @@ class DebateSession:
     )
     resolutions: dict[str, str] = field(default_factory=dict)  # proposer_name -> resolution text
     vote_rounds: list[dict[str, str]] = field(default_factory=list)  # each round: voter_name -> proposer_name voted for
-    notepads: dict[str, str] = field(default_factory=lambda: defaultdict(str))  # agent_name -> private notepad content
 
 
 # ---------------------------------------------------------------------------
@@ -134,35 +146,86 @@ def load_config(config_path: Path) -> tuple[list[Agent], dict, dict]:
     return agents, raw.get("moderator", {}), raw.get("settings", {})
 
 
-def build_client() -> AsyncOpenAI:
-    api_key = os.getenv("OPENROUTER_API_KEY")
-    if not api_key:
-        console.print(
-            Panel(
-                "[bold red]OPENROUTER_API_KEY not set.[/]\n"
-                "Add it to [bold].env[/] or export it:\n"
-                "  [dim]export OPENROUTER_API_KEY=your_key_here[/]",
-                title="Missing API Key",
-                border_style="red",
+_openrouter_client: AsyncOpenAI | None = None
+_xai_client: AsyncOpenAI | None = None
+
+
+def _get_openrouter_client() -> AsyncOpenAI:
+    global _openrouter_client
+    if _openrouter_client is None:
+        api_key = os.getenv("OPENROUTER_API_KEY")
+        if not api_key:
+            console.print(
+                Panel(
+                    "[bold red]OPENROUTER_API_KEY not set.[/]\n"
+                    "Add it to [bold].env[/] or export it:\n"
+                    "  [dim]export OPENROUTER_API_KEY=your_key_here[/]",
+                    title="Missing API Key",
+                    border_style="red",
+                )
             )
+            sys.exit(1)
+        _openrouter_client = AsyncOpenAI(
+            api_key=api_key,
+            base_url=API_BASE,
+            default_headers={
+                "HTTP-Referer": "https://github.com/TheCouncil",
+                "X-Title": "TheCouncil",
+            },
         )
-        sys.exit(1)
-    return AsyncOpenAI(
-        api_key=api_key,
-        base_url=API_BASE,
-        default_headers={
-            "HTTP-Referer": "https://github.com/TheCouncil",
-            "X-Title": "TheCouncil",
-        },
-    )
+    return _openrouter_client
+
+
+def _get_xai_client() -> AsyncOpenAI:
+    global _xai_client
+    if _xai_client is None:
+        api_key = os.getenv("XAI_API_KEY")
+        if not api_key:
+            console.print(
+                Panel(
+                    "[bold red]XAI_API_KEY not set.[/]\n"
+                    "Add it to [bold].env[/] for Grok models:\n"
+                    "  [dim]export XAI_API_KEY=your_key_here[/]",
+                    title="Missing XAI API Key",
+                    border_style="red",
+                )
+            )
+            sys.exit(1)
+        _xai_client = AsyncOpenAI(api_key=api_key, base_url=XAI_API_BASE)
+    return _xai_client
+
+
+def get_client_for_model(model: str) -> tuple[AsyncOpenAI, str]:
+    """Return (client, resolved_model) for the given model. Uses XAI API when available for Grok models."""
+    model = (model or MODEL).split(":")[0]
+    if model in XAI_MODEL_MAP and os.getenv("XAI_API_KEY"):
+        return _get_xai_client(), XAI_MODEL_MAP[model]
+    return _get_openrouter_client(), model
 
 
 # ---------------------------------------------------------------------------
 # Context helpers
 # ---------------------------------------------------------------------------
 
-def build_transcript(session: DebateSession, up_to_round: int) -> str:
-    """Build public transcript from all rounds strictly before up_to_round."""
+# Cost efficiency: truncate older round responses when context grows. ~400 chars keeps key points.
+_TRUNCATE_RESPONSE_CHARS = 420
+
+
+def _truncate_response(content: str, max_chars: int = _TRUNCATE_RESPONSE_CHARS) -> str:
+    """Truncate long responses for cost efficiency, preserving opening and key info."""
+    content = content.strip()
+    if len(content) <= max_chars:
+        return content
+    return content[: max_chars - 20].rsplit(maxsplit=1)[0] + "… [truncated]"
+
+
+def build_transcript(
+    session: DebateSession,
+    up_to_round: int,
+    truncate_rounds_before: int | None = None,
+) -> str:
+    """Build public transcript from all rounds strictly before up_to_round.
+    When truncate_rounds_before is set (e.g. 3), rounds before that get truncated responses."""
     ROUND_LABELS = {
         1: "Round 1 — Independent Takes",
         2: "Round 2 — Cross-Debate I",
@@ -176,10 +239,12 @@ def build_transcript(session: DebateSession, up_to_round: int) -> str:
         rn = responses[0].round_num
         if rn >= up_to_round:
             break
+        truncate = truncate_rounds_before is not None and rn < truncate_rounds_before
         label = ROUND_LABELS.get(rn, f"Round {rn} — Tie-Breaker Debate" if rn >= 5 else f"Round {rn}")
         parts.append(f"## {label}\n")
         for r in responses:
-            parts.append(f"### {r.agent.name} ({r.agent.role}):\n{r.content}\n")
+            content = _truncate_response(r.content) if truncate else r.content
+            parts.append(f"### {r.agent.name} ({r.agent.role}):\n{content}\n")
     return "\n".join(parts)
 
 
@@ -200,55 +265,19 @@ def deliver_dm(dm: DM, session: DebateSession) -> None:
     session.dms.append(dm)
 
 
-def _notepad_context(session: DebateSession, agent_name: str) -> str:
-    """Build the private notepad block for an agent's prompt."""
-    content = session.notepads.get(agent_name, "") or "(empty)"
-    return (
-        f"\n\nYOUR PRIVATE NOTEPAD (visible only to you; others cannot see this):\n"
-        f"---\n{content}\n---\n\n"
-        f"To append to your notepad, end your response with exactly:\n"
-        f"---NOTEPAD---\n"
-        f"[your private note — research, reminders, strategy]\n"
-        f"---END---"
-    )
-
-
-def _parse_and_update_notepad(raw: str, agent_name: str, session: DebateSession) -> str:
-    """Extract notepad blocks from raw output, update session, return content without notepad."""
-    if "---NOTEPAD---" not in raw or "---END---" not in raw:
-        return raw
-
-    result_parts: list[str] = []
-    rest = raw
-    while "---NOTEPAD---" in rest and "---END---" in rest:
-        before, block = rest.split("---NOTEPAD---", 1)
-        note_part, after = block.split("---END---", 1)
-        result_parts.append(before)
-        note = note_part.strip()
-        if note:
-            existing = session.notepads.get(agent_name, "")
-            session.notepads[agent_name] = (
-                (existing + "\n" + note).strip() if existing else note
-            )
-        rest = after
-
-    result_parts.append(rest)
-    return "".join(result_parts).strip()
-
-
 # ---------------------------------------------------------------------------
 # API helpers
 # ---------------------------------------------------------------------------
 
 async def api_call(
-    client: AsyncOpenAI,
     input_msgs: list[dict],
     max_tokens: int = 1024,
     model: str | None = None,
 ) -> str:
-    """Non-streaming async call. Returns full output text."""
+    """Non-streaming async call. Returns full output text. Routes to XAI or OpenRouter based on model."""
+    client, resolved_model = get_client_for_model(model or MODEL)
     response = await client.responses.create(
-        model=model or MODEL,
+        model=resolved_model,
         input=input_msgs,
         max_output_tokens=max_tokens,
     )
@@ -256,15 +285,15 @@ async def api_call(
 
 
 async def api_stream(
-    client: AsyncOpenAI,
     input_msgs: list[dict],
     max_tokens: int = 1024,
     model: str | None = None,
 ) -> str:
     """Streaming async call — prints tokens live. Use only in sequential context."""
+    client, resolved_model = get_client_for_model(model or MODEL)
     collected: list[str] = []
     async with client.responses.stream(
-        model=model or MODEL,
+        model=resolved_model,
         input=input_msgs,
         max_output_tokens=max_tokens,
     ) as stream:
@@ -398,7 +427,6 @@ def _parse_multi_dm(raw: str, sender: Agent, session: DebateSession, round_num: 
 
 
 async def _attempt_dm(
-    client: AsyncOpenAI,
     agent: Agent,
     session: DebateSession,
     round_num: int,
@@ -408,7 +436,6 @@ async def _attempt_dm(
     """After a public response, ask agent if they want to DM someone."""
     other_names = ", ".join(f'"{a.name}"' for a in session.agents if a.name != agent.name)
     dm_prompt = _DM_SINGLE_PROMPT.format(recipients=other_names)
-    notepad_ctx = _notepad_context(session, agent.name)
 
     input_msgs = [
         {"role": "system", "content": agent.system_prompt},
@@ -416,24 +443,21 @@ async def _attempt_dm(
             f"Question under debate: {session.question}\n\n"
             f"{prior_ctx}\n\n"
             f"Your public response:\n{public_response}\n\n"
-            f"{dm_prompt}{notepad_ctx}"
+            f"{dm_prompt}"
         )},
     ]
     model = agent.model or session.model
-    raw = await api_call(client, input_msgs, max_tokens=120, model=model)
-    _parse_and_update_notepad(raw, agent.name, session)
+    raw = await api_call(input_msgs, max_tokens=120, model=model)
     return _parse_single_dm(raw, agent, session, round_num)
 
 
 async def _dm_only_round(
-    client: AsyncOpenAI,
     agent: Agent,
     session: DebateSession,
 ) -> list[DM]:
-    """Round 4: agent generates private DMs, no public output."""
-    prior_ctx = build_transcript(session, up_to_round=99)
+    """Round 3: agent generates private DMs, no public output."""
+    prior_ctx = build_transcript(session, up_to_round=99, truncate_rounds_before=3)
     inbox_ctx = pop_inbox(session, agent.name)
-    notepad_ctx = _notepad_context(session, agent.name)
     other_names = ", ".join(f'"{a.name}"' for a in session.agents if a.name != agent.name)
     dm_prompt = _DM_MULTI_PROMPT.format(recipients=other_names)
 
@@ -443,13 +467,12 @@ async def _dm_only_round(
             f"Question under debate: {session.question}\n\n"
             f"Full public debate transcript:\n{prior_ctx}"
             f"{inbox_ctx}\n\n"
-            f"{dm_prompt}{notepad_ctx}"
+            f"{dm_prompt}"
         )},
     ]
     # 4 agents × (header + 50-word message) = ~120 tokens each, 480 max for all DMs
     model = agent.model or session.model
-    raw = await api_call(client, input_msgs, max_tokens=480, model=model)
-    _parse_and_update_notepad(raw, agent.name, session)
+    raw = await api_call(input_msgs, max_tokens=480, model=model)
     return _parse_multi_dm(raw, agent, session, 4)
 
 
@@ -458,13 +481,11 @@ async def _dm_only_round(
 # ---------------------------------------------------------------------------
 
 async def _agent_round1(
-    client: AsyncOpenAI,
     agent: Agent,
     session: DebateSession,
 ) -> tuple[AgentResponse, DM | None]:
     """Round 1: independent take (parallel, non-streaming)."""
     inbox_ctx = pop_inbox(session, agent.name)
-    notepad_ctx = _notepad_context(session, agent.name)
 
     input_msgs = [
         {"role": "system", "content": agent.system_prompt},
@@ -472,27 +493,26 @@ async def _agent_round1(
             f"The council has been asked to evaluate:\n\n---\n{session.question}\n---\n\n"
             f"Provide your independent analysis. Do not hedge — be direct and specific."
             f"{PERSUASION_NARRATIVE}"
-            f"{inbox_ctx}{notepad_ctx}"
+            f"{inbox_ctx}"
         )},
     ]
     model = agent.model or session.model
-    raw_content = await api_call(client, input_msgs, model=model)
-    content = _parse_and_update_notepad(raw_content, agent.name, session)
+    content = (await api_call(input_msgs, model=model)).strip()
     response = AgentResponse(agent=agent, round_num=1, content=content)
 
-    dm = await _attempt_dm(client, agent, session, 1, content, "")
+    dm = await _attempt_dm(agent, session, 1, content, "")
     return response, dm
 
 
 async def _agent_cross_debate(
-    client: AsyncOpenAI,
     agent: Agent,
     session: DebateSession,
     round_num: int,
     already_responded: list[AgentResponse],
 ) -> tuple[AgentResponse, DM | None]:
     """Cross-debate round (sequential, streaming). Agent sees prior rounds + already-responded peers."""
-    prior_ctx = build_transcript(session, up_to_round=round_num)
+    truncate_before = 3 if round_num >= 4 else None
+    prior_ctx = build_transcript(session, up_to_round=round_num, truncate_rounds_before=truncate_before)
     inbox_ctx = pop_inbox(session, agent.name)
 
     # Agents who already spoke in THIS round are appended as "in-progress" context
@@ -513,7 +533,6 @@ async def _agent_cross_debate(
     )
     console.print()
 
-    notepad_ctx = _notepad_context(session, agent.name)
     input_msgs = [
         {"role": "system", "content": agent.system_prompt},
         {"role": "user", "content": (
@@ -522,25 +541,24 @@ async def _agent_cross_debate(
             f"Now engage in debate. Respond to the other experts — agree where they are right, "
             f"challenge where they are wrong. Name who you are responding to."
             f"{PERSUASION_NARRATIVE}"
-            f"{inbox_ctx}{notepad_ctx}"
+            f"{inbox_ctx}"
         )},
     ]
 
     model = agent.model or session.model
     start = time.monotonic()
-    raw_content = await api_stream(client, input_msgs, model=model)
-    content = _parse_and_update_notepad(raw_content, agent.name, session)
+    content = (await api_stream(input_msgs, model=model)).strip()
     elapsed = time.monotonic() - start
     console.print(f"[dim]└─ {agent.name} finished in {elapsed:.1f}s[/]")
 
     response = AgentResponse(agent=agent, round_num=round_num, content=content)
-    prior_for_dm = build_transcript(session, up_to_round=round_num)
-    dm = await _attempt_dm(client, agent, session, round_num, content, prior_for_dm)
+    truncate_before = 3 if round_num >= 4 else None
+    prior_for_dm = build_transcript(session, up_to_round=round_num, truncate_rounds_before=truncate_before)
+    dm = await _attempt_dm(agent, session, round_num, content, prior_for_dm)
     return response, dm
 
 
 async def _agent_tiebreaker_debate(
-    client: AsyncOpenAI,
     agent: Agent,
     session: DebateSession,
     round_num: int,
@@ -548,7 +566,7 @@ async def _agent_tiebreaker_debate(
     already_responded: list[AgentResponse],
 ) -> AgentResponse:
     """Tie-breaker debate: agents discuss only the tied resolutions. No DM."""
-    prior_ctx = build_transcript(session, up_to_round=round_num)
+    prior_ctx = build_transcript(session, up_to_round=round_num, truncate_rounds_before=5)
     inbox_ctx = pop_inbox(session, agent.name)
     tied_resolutions = "\n\n".join(
         f"**{p}**: {session.resolutions[p]}" for p in tied_proposers
@@ -570,7 +588,6 @@ async def _agent_tiebreaker_debate(
     )
     console.print()
 
-    notepad_ctx = _notepad_context(session, agent.name)
     input_msgs = [
         {"role": "system", "content": agent.system_prompt},
         {"role": "user", "content": (
@@ -580,14 +597,13 @@ async def _agent_tiebreaker_debate(
             f"Focus only on these options:\n\n{tied_resolutions}\n\n"
             f"Engage with the other experts. Try to converge on one resolution."
             f"{PERSUASION_NARRATIVE}"
-            f"{inbox_ctx}{notepad_ctx}"
+            f"{inbox_ctx}"
         )},
     ]
 
     model = agent.model or session.model
     start = time.monotonic()
-    raw_content = await api_stream(client, input_msgs, model=model)
-    content = _parse_and_update_notepad(raw_content, agent.name, session)
+    content = (await api_stream(input_msgs, model=model)).strip()
     elapsed = time.monotonic() - start
     console.print(f"[dim]└─ {agent.name} finished in {elapsed:.1f}s[/]")
 
@@ -641,65 +657,6 @@ def _print_dm_indicator(dm: DM) -> None:
     for line in dm.content.splitlines():
         console.print(f"  [dim]│  {line}[/]", markup=False)
     console.print()
-
-
-_notepad_display_lock = threading.Lock()
-
-
-def _show_notepads(session: DebateSession) -> None:
-    """Print all agent notepads to the console (thread-safe)."""
-    with _notepad_display_lock:
-        console.print()
-        console.rule(
-            Text("  AGENT NOTEPADS (private)  ", style="bold magenta"),
-            style="magenta",
-        )
-        for agent in session.agents:
-            content = session.notepads.get(agent.name, "") or "(empty)"
-            console.print()
-            console.print(
-                Panel(
-                    content,
-                    title=f"[{agent.rich_color}]{agent.name}[/]",
-                    border_style="dim",
-                    padding=(1, 2),
-                )
-            )
-        console.print()
-
-
-def _start_notepad_listener(session: DebateSession) -> keyboard.Listener:
-    """Start background listener for Cmd+Shift+N to show notepads. Returns listener (call .stop())."""
-    cmd_pressed = False
-    shift_pressed = False
-
-    def on_press(key: keyboard.Key | keyboard.KeyCode) -> None:
-        nonlocal cmd_pressed, shift_pressed
-        try:
-            if key in (keyboard.Key.cmd, keyboard.Key.cmd_l, keyboard.Key.cmd_r):
-                cmd_pressed = True
-            elif key in (keyboard.Key.shift, keyboard.Key.shift_l, keyboard.Key.shift_r):
-                shift_pressed = True
-            elif getattr(key, "char", None) and str(key.char).lower() == "n":
-                if cmd_pressed and shift_pressed:
-                    _show_notepads(session)
-        except Exception:
-            pass
-
-    def on_release(key: keyboard.Key | keyboard.KeyCode) -> None:
-        nonlocal cmd_pressed, shift_pressed
-        try:
-            if key in (keyboard.Key.cmd, keyboard.Key.cmd_l, keyboard.Key.cmd_r):
-                cmd_pressed = False
-            elif key in (keyboard.Key.shift, keyboard.Key.shift_l, keyboard.Key.shift_r):
-                shift_pressed = False
-        except Exception:
-            pass
-
-    listener = keyboard.Listener(on_press=on_press, on_release=on_release)
-    listener.daemon = True
-    listener.start()
-    return listener
 
 
 # ---------------------------------------------------------------------------
@@ -766,26 +723,22 @@ def _parse_single_preference_vote(raw: str, valid_proposers: set[str]) -> str | 
 
 
 async def _agent_propose_resolution(
-    client: AsyncOpenAI,
     agent: Agent,
     session: DebateSession,
 ) -> str:
     """Agent proposes their own resolution. Returns resolution text."""
-    transcript = build_transcript(session, up_to_round=99)
-    notepad_ctx = _notepad_context(session, agent.name)
+    transcript = build_transcript(session, up_to_round=99, truncate_rounds_before=3)
     user_content = (
         f"Original question:\n\n---\n{session.question}\n---\n\n"
         f"Debate transcript:\n\n{transcript}\n\n"
-        f"{_PROPOSE_RESOLUTION_PROMPT}{notepad_ctx}"
+        f"{_PROPOSE_RESOLUTION_PROMPT}"
     )
     input_msgs = [
         {"role": "system", "content": agent.system_prompt},
         {"role": "user", "content": user_content},
     ]
     model = agent.model or session.model
-    raw = await api_call(client, input_msgs, max_tokens=200, model=model)
-    cleaned = _parse_and_update_notepad(raw, agent.name, session)
-    return cleaned.strip()
+    return (await api_call(input_msgs, max_tokens=200, model=model)).strip()
 
 
 def _build_resolutions_block(resolutions_in_play: list[tuple[str, str]]) -> str:
@@ -797,30 +750,26 @@ def _build_resolutions_block(resolutions_in_play: list[tuple[str, str]]) -> str:
 
 
 async def _agent_vote_for_one_resolution(
-    client: AsyncOpenAI,
     voter: Agent,
     session: DebateSession,
     resolutions_in_play: list[tuple[str, str]],
 ) -> str | None:
     """Agent votes for exactly one resolution. Returns proposer name or None if invalid."""
-    transcript = build_transcript(session, up_to_round=99)
-    notepad_ctx = _notepad_context(session, voter.name)
+    transcript = build_transcript(session, up_to_round=99, truncate_rounds_before=3)
     resolutions_block = _build_resolutions_block(resolutions_in_play)
     valid_proposers = {p for p, _ in resolutions_in_play}
     user_content = (
         f"Original question:\n\n---\n{session.question}\n---\n\n"
         f"Debate transcript:\n\n{transcript}\n\n"
         f"{_VOTE_FOR_ONE_RESOLUTION_PROMPT.format(resolutions_block=resolutions_block)}"
-        f"{notepad_ctx}"
     )
     input_msgs = [
         {"role": "system", "content": voter.system_prompt},
         {"role": "user", "content": user_content},
     ]
     model = voter.model or session.model
-    raw = await api_call(client, input_msgs, max_tokens=120, model=model)
-    cleaned = _parse_and_update_notepad(raw, voter.name, session)
-    return _parse_single_preference_vote(cleaned, valid_proposers)
+    raw = await api_call(input_msgs, max_tokens=120, model=model)
+    return _parse_single_preference_vote(raw, valid_proposers)
 
 
 # ---------------------------------------------------------------------------
@@ -829,7 +778,6 @@ async def _agent_vote_for_one_resolution(
 
 async def run_council(question: str, config_path: Path) -> None:
     agents, moderator_cfg, settings = load_config(config_path)
-    client = build_client()
 
     if not agents:
         console.print("[bold red]No agents defined in config.[/]")
@@ -841,192 +789,187 @@ async def run_council(question: str, config_path: Path) -> None:
         model=settings.get("model", MODEL),
     )
     _print_header(question, agents)
-    console.print("[dim]Press Cmd+Shift+N to view agent notepads (macOS may require Accessibility permissions).[/]")
     console.print()
 
-    notepad_listener = _start_notepad_listener(session)
-    try:
-        # ── ROUND 1: INDEPENDENT (async parallel) ──────────────────────────────
-        console.rule(Text("  ROUND 1 ·  INDEPENDENT TAKES  ", style="bold yellow"), style="yellow")
-        console.print("\n[dim]All agents deliberating simultaneously…[/]\n")
+    # ── ROUND 1: INDEPENDENT (async parallel) ──────────────────────────────
+    console.rule(Text("  ROUND 1 ·  INDEPENDENT TAKES  ", style="bold yellow"), style="yellow")
+    console.print("\n[dim]All agents deliberating simultaneously…[/]\n")
 
-        r1_results = await asyncio.gather(
-            *[_agent_round1(client, agent, session) for agent in agents]
-        )
+    r1_results = await asyncio.gather(
+        *[_agent_round1(agent, session) for agent in agents]
+    )
 
-        round1_responses = [res for res, _ in r1_results]
-        session.rounds.append(round1_responses)
-        _print_async_responses(round1_responses)
+    round1_responses = [res for res, _ in r1_results]
+    session.rounds.append(round1_responses)
+    _print_async_responses(round1_responses)
 
-        for _, dm in r1_results:
-            if dm:
-                deliver_dm(dm, session)
-                _print_dm_indicator(dm)
+    for _, dm in r1_results:
+        if dm:
+            deliver_dm(dm, session)
+            _print_dm_indicator(dm)
 
-        # ── ROUND 2: CROSS-DEBATE I (sequential, streaming) ───────────────────
+    # ── ROUND 2: CROSS-DEBATE I (sequential, streaming) ───────────────────
+    console.print()
+    console.rule(Text("  ROUND 2  ·  CROSS-DEBATE I  ", style="bold yellow"), style="yellow")
+
+    round2_responses: list[AgentResponse] = []
+    for agent in agents:
+        response, dm = await _agent_cross_debate(agent, session, 2, round2_responses)
+        round2_responses.append(response)
+        if dm:
+            deliver_dm(dm, session)
+            _print_dm_indicator(dm)
+
+    session.rounds.append(round2_responses)
+
+    # ── ROUND 3: PRIVATE DELIBERATION (async parallel, DM-only) ───────────
+    console.print()
+    console.rule(
+        Text("  ROUND 3  ·  PRIVATE DELIBERATION  ", style="bold magenta"), style="magenta"
+    )
+    console.print("\n[dim]Agents exchanging private messages…[/]\n")
+
+    dm_batches = await asyncio.gather(
+        *[_dm_only_round(agent, session) for agent in agents]
+    )
+
+    round3_dms: list[DM] = []
+    for batch in dm_batches:
+        for dm in batch:
+            round3_dms.append(dm)
+            session.dms.append(dm)
+            # Deliver to inbox — agents will see these in Cross-Debate II
+            deliver_dm(dm, session)
+            console.print()
+            console.print(f"  [dim]🔒  {dm.sender}  →  {dm.recipient}[/]")
+            for line in dm.content.splitlines():
+                console.print(f"  [dim]│  {line}[/]", markup=False)
+            console.print()
+
+    if not round3_dms:
+        console.print("  [dim]No private messages exchanged.[/]")
+
+    # ── ROUND 4: CROSS-DEBATE II (sequential, streaming) ──────────────────
+    console.print()
+    console.rule(Text("  ROUND 4  ·  CROSS-DEBATE II  ", style="bold yellow"), style="yellow")
+
+    round4_responses: list[AgentResponse] = []
+    for agent in agents:
+        response, dm = await _agent_cross_debate(agent, session, 4, round4_responses)
+        round4_responses.append(response)
+        if dm:
+            deliver_dm(dm, session)
+            _print_dm_indicator(dm)
+
+    session.rounds.append(round4_responses)
+
+    # ── EACH AGENT PROPOSES A RESOLUTION ───────────────────────────────────
+    console.print()
+    console.rule(
+        Text("  PROPOSE RESOLUTIONS  ", style="bold white on dark_magenta"),
+        style="magenta",
+    )
+    console.print()
+
+    for agent in agents:
+        resolution = await _agent_propose_resolution(agent, session)
+        session.resolutions[agent.name] = resolution
+        console.print(f"  [{agent.rich_color}]{agent.name}[/]:")
+        console.print(Panel(resolution, border_style="dim", padding=(0, 2)))
         console.print()
-        console.rule(Text("  ROUND 2  ·  CROSS-DEBATE I  ", style="bold yellow"), style="yellow")
 
-        round2_responses: list[AgentResponse] = []
-        for agent in agents:
-            response, dm = await _agent_cross_debate(client, agent, session, 2, round2_responses)
-            round2_responses.append(response)
-            if dm:
-                deliver_dm(dm, session)
-                _print_dm_indicator(dm)
+    # ── VOTE FOR ONE RESOLUTION (with tie-breaker loop) ──────────────────────
+    MAX_TIEBREAKER_ROUNDS = 5
+    active_resolutions = list(session.resolutions.keys())
+    tiebreaker_round = 5
+    final_winner: str | None = None
 
-        session.rounds.append(round2_responses)
-
-        # ── ROUND 3: PRIVATE DELIBERATION (async parallel, DM-only) ───────────
-        console.print()
+    while True:
         console.rule(
-            Text("  ROUND 3  ·  PRIVATE DELIBERATION  ", style="bold magenta"), style="magenta"
+            Text(
+                f"  VOTE  ·  Pick one resolution  "
+                + ("(tie-breaker)" if len(active_resolutions) < len(session.resolutions) else ""),
+                style="bold yellow",
+            ),
+            style="yellow",
         )
-        console.print("\n[dim]Agents exchanging private messages…[/]\n")
-
-        dm_batches = await asyncio.gather(
-            *[_dm_only_round(client, agent, session) for agent in agents]
-        )
-
-        round3_dms: list[DM] = []
-        for batch in dm_batches:
-            for dm in batch:
-                round3_dms.append(dm)
-                session.dms.append(dm)
-                # Deliver to inbox — agents will see these in Cross-Debate II
-                deliver_dm(dm, session)
-                console.print()
-                console.print(f"  [dim]🔒  {dm.sender}  →  {dm.recipient}[/]")
-                for line in dm.content.splitlines():
-                    console.print(f"  [dim]│  {line}[/]", markup=False)
-                console.print()
-
-        if not round3_dms:
-            console.print("  [dim]No private messages exchanged.[/]")
-
-        # ── ROUND 4: CROSS-DEBATE II (sequential, streaming) ──────────────────
         console.print()
-        console.rule(Text("  ROUND 4  ·  CROSS-DEBATE II  ", style="bold yellow"), style="yellow")
 
-        round4_responses: list[AgentResponse] = []
-        for agent in agents:
-            response, dm = await _agent_cross_debate(client, agent, session, 4, round4_responses)
-            round4_responses.append(response)
-            if dm:
-                deliver_dm(dm, session)
-                _print_dm_indicator(dm)
+        resolutions_in_play = [(p, session.resolutions[p]) for p in active_resolutions]
+        votes: dict[str, str] = {}
 
-        session.rounds.append(round4_responses)
+        for voter in agents:
+            voted_for = await _agent_vote_for_one_resolution(
+                voter, session, resolutions_in_play
+            )
+            if voted_for:
+                votes[voter.name] = voted_for
+                console.print(
+                    f"  [{voter.rich_color}]{voter.name}[/]: [bold]{voted_for}[/]"
+                )
+            else:
+                console.print(
+                    f"  [{voter.rich_color}]{voter.name}[/]: [dim](invalid vote, skipped)[/]"
+                )
 
-        # ── EACH AGENT PROPOSES A RESOLUTION ───────────────────────────────────
+        session.vote_rounds.append(votes)
+        counts = _compute_vote_counts(votes)
+        winners = _get_tied_winners(counts)
+
+        for p, c in sorted(counts.items(), key=lambda x: -x[1]):
+            console.print(f"  [dim]→ {p}: {c} vote(s)[/]")
         console.print()
+
+        if len(winners) == 1:
+            final_winner = winners[0]
+            break
+
+        # No valid votes: keep current set and run tie-breaker
+        if not winners:
+            winners = active_resolutions
+
+        # Tie: run tie-breaker debate
+        if tiebreaker_round - 5 >= MAX_TIEBREAKER_ROUNDS:
+            console.print(
+                "[dim]Max tie-breaker rounds reached. Picking first tied resolution.[/]"
+            )
+            final_winner = winners[0]
+            break
+
+        active_resolutions = winners
         console.rule(
-            Text("  PROPOSE RESOLUTIONS  ", style="bold white on dark_magenta"),
+            Text(f"  TIE-BREAKER  ·  Debate round {tiebreaker_round - 4}  ", style="bold magenta"),
             style="magenta",
         )
-        console.print()
+        console.print(
+            f"\n[dim]Resolutions still in contention: {', '.join(active_resolutions)}[/]\n"
+        )
 
+        tiebreaker_responses: list[AgentResponse] = []
         for agent in agents:
-            resolution = await _agent_propose_resolution(client, agent, session)
-            session.resolutions[agent.name] = resolution
-            console.print(f"  [{agent.rich_color}]{agent.name}[/]:")
-            console.print(Panel(resolution, border_style="dim", padding=(0, 2)))
-            console.print()
-
-        # ── VOTE FOR ONE RESOLUTION (with tie-breaker loop) ──────────────────────
-        MAX_TIEBREAKER_ROUNDS = 5
-        active_resolutions = list(session.resolutions.keys())
-        tiebreaker_round = 5
-        final_winner: str | None = None
-
-        while True:
-            console.rule(
-                Text(
-                    f"  VOTE  ·  Pick one resolution  "
-                    + ("(tie-breaker)" if len(active_resolutions) < len(session.resolutions) else ""),
-                    style="bold yellow",
-                ),
-                style="yellow",
+            response = await _agent_tiebreaker_debate(
+                agent, session, tiebreaker_round, active_resolutions, tiebreaker_responses
             )
-            console.print()
+            tiebreaker_responses.append(response)
+        session.rounds.append(tiebreaker_responses)
+        tiebreaker_round += 1
 
-            resolutions_in_play = [(p, session.resolutions[p]) for p in active_resolutions]
-            votes: dict[str, str] = {}
-
-            for voter in agents:
-                voted_for = await _agent_vote_for_one_resolution(
-                    client, voter, session, resolutions_in_play
-                )
-                if voted_for:
-                    votes[voter.name] = voted_for
-                    console.print(
-                        f"  [{voter.rich_color}]{voter.name}[/]: [bold]{voted_for}[/]"
-                    )
-                else:
-                    console.print(
-                        f"  [{voter.rich_color}]{voter.name}[/]: [dim](invalid vote, skipped)[/]"
-                    )
-
-            session.vote_rounds.append(votes)
-            counts = _compute_vote_counts(votes)
-            winners = _get_tied_winners(counts)
-
-            for p, c in sorted(counts.items(), key=lambda x: -x[1]):
-                console.print(f"  [dim]→ {p}: {c} vote(s)[/]")
-            console.print()
-
-            if len(winners) == 1:
-                final_winner = winners[0]
-                break
-
-            # No valid votes: keep current set and run tie-breaker
-            if not winners:
-                winners = active_resolutions
-
-            # Tie: run tie-breaker debate
-            if tiebreaker_round - 5 >= MAX_TIEBREAKER_ROUNDS:
-                console.print(
-                    "[dim]Max tie-breaker rounds reached. Picking first tied resolution.[/]"
-                )
-                final_winner = winners[0]
-                break
-
-            active_resolutions = winners
-            console.rule(
-                Text(f"  TIE-BREAKER  ·  Debate round {tiebreaker_round - 4}  ", style="bold magenta"),
-                style="magenta",
+    # ── FINAL RESOLUTION ────────────────────────────────────────────────────
+    console.rule(Text("  COUNCIL CONSENSUS  ", style="bold white on dark_blue"), style="blue")
+    console.print()
+    if final_winner:
+        final_resolution = session.resolutions[final_winner]
+        console.print(
+            Panel(
+                final_resolution,
+                title=f"[bold green]Final Resolution[/] (proposed by {final_winner})",
+                border_style="green",
+                padding=(1, 2),
             )
-            console.print(
-                f"\n[dim]Resolutions still in contention: {', '.join(active_resolutions)}[/]\n"
-            )
-
-            tiebreaker_responses: list[AgentResponse] = []
-            for agent in agents:
-                response = await _agent_tiebreaker_debate(
-                    client, agent, session, tiebreaker_round, active_resolutions, tiebreaker_responses
-                )
-                tiebreaker_responses.append(response)
-            session.rounds.append(tiebreaker_responses)
-            tiebreaker_round += 1
-
-        # ── FINAL RESOLUTION ────────────────────────────────────────────────────
-        console.rule(Text("  COUNCIL CONSENSUS  ", style="bold white on dark_blue"), style="blue")
+        )
         console.print()
-        if final_winner:
-            final_resolution = session.resolutions[final_winner]
-            console.print(
-                Panel(
-                    final_resolution,
-                    title=f"[bold green]Final Resolution[/] (proposed by {final_winner})",
-                    border_style="green",
-                    padding=(1, 2),
-                )
-            )
-        console.print()
-        console.rule(Text("  SESSION COMPLETE  ", style="bold white on dark_blue"), style="blue")
-        console.print()
-    finally:
-        notepad_listener.stop()
+    console.rule(Text("  SESSION COMPLETE  ", style="bold white on dark_blue"), style="blue")
+    console.print()
 
 
 # ---------------------------------------------------------------------------
