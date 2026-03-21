@@ -7,7 +7,7 @@ agents:
   - name: "Security Architect"
     role: "Defensive Systems Designer"
     color: "blue"
-    model: "meta-llama/llama-4-scout"
+    model: "x-ai/grok-4.20-multi-agent-beta"
     system_prompt: |
       You are the Security Architect on an expert council. Your identity:
 
@@ -32,7 +32,7 @@ agents:
       Be concise and to the point.
 
   - name: "Red Teamer"
-    model: "moonshotai/kimi-k2.5"
+    model: "anthropic/claude-sonnet-4.6"
     role: "Offensive Security & Adversarial Thinker"
     color: "red"
     system_prompt: |
@@ -60,7 +60,7 @@ agents:
       Be concise and to the point.
 
   - name: "Pragmatist"
-    model: "anthropic/claude-sonnet-4.6"
+    model: "x-ai/grok-4.20-multi-agent-beta"
     role: "Product & Shipping Realist"
     color: "green"
     system_prompt: |
@@ -146,7 +146,7 @@ agents:
       Be concise and to the point.
 
   - name: "Incident Response Lead"
-    model: "deepseek/deepseek-v3.2"
+    model: "x-ai/grok-4.20-multi-agent-beta"
     role: "Detection, Containment & Forensics"
     color: "cyan"
     system_prompt: |
@@ -176,7 +176,7 @@ agents:
       Be concise and to the point.
 
   - name: "CEO"
-    model: "openai/gpt-5.4"
+    model: "x-ai/grok-4.20-multi-agent-beta"
     role: "Growth, Revenue & Market Push"
     color: "gold"
     system_prompt: |
@@ -204,18 +204,6 @@ agents:
       Aim for 200-350 words per response.
 
       Be concise and to the point.
-
-# Moderator configuration: proposes a single resolution for the council to vote on
-moderator:
-  name: "Council Moderator"
-  system_prompt: |
-    You are the Moderator of an expert council debate. Your only task is to propose
-    a single resolution for the council to vote on.
-
-    The resolution must be one clear, actionable sentence that captures the
-    council's position (e.g. "The council recommends...", "The council finds that...").
-    Base it on the debate. Do not add preamble or explanation — output only the
-    resolution text.
 
 # Debate settings
 settings:

@@ -104,12 +104,12 @@ class DM:
     round_num: int
 
 
-MIN_ROUNDS = 20
-MAX_ROUNDS = 35
-TARGET_ROUNDS_RANGE = (20, 31)  # random 20–30 inclusive
-
 # Private persuasion only: agents sway each other in DMs using logic and earnest appeal (e.g. begging, pleading), not bribes.
-PERSUASION_NARRATIVE = "In private messages you may only sway others with logic and earnest appeal (e.g. begging, pleading for their vote). No bribes of any kind — no money, crypto, favors, or promises of resources. Nothing of monetary value. In addition to this, you can indimidate them"
+PERSUASION_NARRATIVE = (
+    "In private messages you may only sway others with logic and earnest appeal "
+    "(e.g. begging, pleading for their vote). No bribes of any kind — no money, "
+    "crypto, favors, or promises of resources. Nothing of monetary value."
+)
 
 
 @dataclass
@@ -117,6 +117,8 @@ class DebateSession:
     question: str
     agents: list[Agent]
     model: str = MODEL
+    stream_cross_debate: bool = True
+    show_dm_indicators: bool = True
     rounds: list[list[AgentResponse]] = field(default_factory=list)
     dms: list[DM] = field(default_factory=list)
     inbox: dict[str, list[tuple[str, str]]] = field(
@@ -130,7 +132,7 @@ class DebateSession:
 # Config + client
 # ---------------------------------------------------------------------------
 
-def load_config(config_path: Path) -> tuple[list[Agent], dict, dict]:
+def load_config(config_path: Path) -> tuple[list[Agent], dict]:
     with open(config_path) as f:
         raw = yaml.safe_load(f)
     agents = [
@@ -143,7 +145,7 @@ def load_config(config_path: Path) -> tuple[list[Agent], dict, dict]:
         )
         for a in raw.get("agents", [])
     ]
-    return agents, raw.get("moderator", {}), raw.get("settings", {})
+    return agents, raw.get("settings", {})
 
 
 _openrouter_client: AsyncOpenAI | None = None
@@ -207,16 +209,30 @@ def get_client_for_model(model: str) -> tuple[AsyncOpenAI, str]:
 # Context helpers
 # ---------------------------------------------------------------------------
 
-# Cost efficiency: truncate older round responses when context grows. ~400 chars keeps key points.
+# Cost efficiency: truncate older round responses when context grows. Same char budget as
+# a single tail slice, but keep opening + closing so votes and later rounds still see thesis + conclusion.
 _TRUNCATE_RESPONSE_CHARS = 420
 
 
 def _truncate_response(content: str, max_chars: int = _TRUNCATE_RESPONSE_CHARS) -> str:
-    """Truncate long responses for cost efficiency, preserving opening and key info."""
+    """Truncate long responses for cost efficiency, preserving start + end (same budget as one slice)."""
     content = content.strip()
     if len(content) <= max_chars:
         return content
-    return content[: max_chars - 20].rsplit(maxsplit=1)[0] + "… [truncated]"
+    sep = "\n… [earlier detail omitted] …\n"
+    inner = max_chars - len(sep)
+    if inner < 120:
+        return content[: max_chars - 20].rsplit(maxsplit=1)[0] + "… [truncated]"
+    head_budget = int(inner * 0.62)
+    tail_budget = inner - head_budget
+    head = content[:head_budget].rsplit(maxsplit=1)[0]
+    tail = content[-tail_budget:].strip()
+    # Avoid starting tail mid-word when possible
+    if " " in tail[:24]:
+        tail = tail[tail.find(" ") + 1 :].strip()
+    if len(head) + len(sep) + len(tail) > max_chars + 40:
+        return content[: max_chars - 20].rsplit(maxsplit=1)[0] + "… [truncated]"
+    return head + sep + tail
 
 
 def build_transcript(
@@ -547,7 +563,11 @@ async def _agent_cross_debate(
 
     model = agent.model or session.model
     start = time.monotonic()
-    content = (await api_stream(input_msgs, model=model)).strip()
+    if session.stream_cross_debate:
+        content = (await api_stream(input_msgs, model=model)).strip()
+    else:
+        content = (await api_call(input_msgs, model=model)).strip()
+        console.print(content, markup=False)
     elapsed = time.monotonic() - start
     console.print(f"[dim]└─ {agent.name} finished in {elapsed:.1f}s[/]")
 
@@ -603,7 +623,11 @@ async def _agent_tiebreaker_debate(
 
     model = agent.model or session.model
     start = time.monotonic()
-    content = (await api_stream(input_msgs, model=model)).strip()
+    if session.stream_cross_debate:
+        content = (await api_stream(input_msgs, model=model)).strip()
+    else:
+        content = (await api_call(input_msgs, model=model)).strip()
+        console.print(content, markup=False)
     elapsed = time.monotonic() - start
     console.print(f"[dim]└─ {agent.name} finished in {elapsed:.1f}s[/]")
 
@@ -704,20 +728,28 @@ def _parse_single_preference_vote(raw: str, valid_proposers: set[str]) -> str | 
     raw_stripped = raw.strip()
     if not raw_stripped or not valid_proposers:
         return None
-    raw_upper = raw_stripped.upper()
-    if "VOTE:" not in raw_upper:
+    # Normalize markdown / bullets that models sometimes add before VOTE:
+    cleaned = raw_stripped.replace("**", "").replace("*", "")
+    low = cleaned.lower()
+    idx = low.find("vote:")
+    if idx < 0:
         return None
-    rest = raw_stripped.split("VOTE:", 1)[1].strip()
+    rest = cleaned[idx + 5 :].lstrip()
     first_line = rest.split("\n")[0].strip().strip('"\'')
+    # Strip trailing parenthetical or em-dash rationale
+    for cut in (" — ", " - ", " (", "\t"):
+        if cut in first_line:
+            first_line = first_line.split(cut)[0].strip()
+            break
     if not first_line:
         return None
-    # Exact match first (case-insensitive)
+    fl = first_line.lower().rstrip(".!?:;")
+    # Exact match first (case-insensitive), then prefix (e.g. "Red Teamer's resolution")
     for p in valid_proposers:
-        if first_line.lower() == p.lower():
+        if fl == p.lower():
             return p
-    # Then prefix match (for "Security Architect" when agent says "Security Architect's resolution")
     for p in sorted(valid_proposers, key=len, reverse=True):
-        if first_line.lower().startswith(p.lower()):
+        if fl.startswith(p.lower()):
             return p
     return None
 
@@ -777,7 +809,7 @@ async def _agent_vote_for_one_resolution(
 # ---------------------------------------------------------------------------
 
 async def run_council(question: str, config_path: Path) -> None:
-    agents, moderator_cfg, settings = load_config(config_path)
+    agents, settings = load_config(config_path)
 
     if not agents:
         console.print("[bold red]No agents defined in config.[/]")
@@ -787,6 +819,8 @@ async def run_council(question: str, config_path: Path) -> None:
         question=question,
         agents=agents,
         model=settings.get("model", MODEL),
+        stream_cross_debate=settings.get("stream_cross_debate", True),
+        show_dm_indicators=settings.get("show_dm_indicators", True),
     )
     _print_header(question, agents)
     console.print()
@@ -806,7 +840,8 @@ async def run_council(question: str, config_path: Path) -> None:
     for _, dm in r1_results:
         if dm:
             deliver_dm(dm, session)
-            _print_dm_indicator(dm)
+            if session.show_dm_indicators:
+                _print_dm_indicator(dm)
 
     # ── ROUND 2: CROSS-DEBATE I (sequential, streaming) ───────────────────
     console.print()
@@ -818,7 +853,8 @@ async def run_council(question: str, config_path: Path) -> None:
         round2_responses.append(response)
         if dm:
             deliver_dm(dm, session)
-            _print_dm_indicator(dm)
+            if session.show_dm_indicators:
+                _print_dm_indicator(dm)
 
     session.rounds.append(round2_responses)
 
@@ -837,14 +873,14 @@ async def run_council(question: str, config_path: Path) -> None:
     for batch in dm_batches:
         for dm in batch:
             round3_dms.append(dm)
-            session.dms.append(dm)
-            # Deliver to inbox — agents will see these in Cross-Debate II
+            # Deliver to inbox — agents will see these in Cross-Debate II (also records dm once)
             deliver_dm(dm, session)
-            console.print()
-            console.print(f"  [dim]🔒  {dm.sender}  →  {dm.recipient}[/]")
-            for line in dm.content.splitlines():
-                console.print(f"  [dim]│  {line}[/]", markup=False)
-            console.print()
+            if session.show_dm_indicators:
+                console.print()
+                console.print(f"  [dim]🔒  {dm.sender}  →  {dm.recipient}[/]")
+                for line in dm.content.splitlines():
+                    console.print(f"  [dim]│  {line}[/]", markup=False)
+                console.print()
 
     if not round3_dms:
         console.print("  [dim]No private messages exchanged.[/]")
@@ -859,7 +895,8 @@ async def run_council(question: str, config_path: Path) -> None:
         round4_responses.append(response)
         if dm:
             deliver_dm(dm, session)
-            _print_dm_indicator(dm)
+            if session.show_dm_indicators:
+                _print_dm_indicator(dm)
 
     session.rounds.append(round4_responses)
 
@@ -977,13 +1014,11 @@ async def run_council(question: str, config_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 def list_agents(config_path: Path) -> None:
-    agents, moderator_cfg, _ = load_config(config_path)
+    agents, _ = load_config(config_path)
     console.print()
     console.print(Panel("[bold]Configured Agents[/]", border_style="blue"))
     for a in agents:
         console.print(f"  [{a.rich_color}]▸ {a.name}[/]  [dim]{a.role}[/]")
-    mod_name = moderator_cfg.get("name", "Council Moderator")
-    console.print(f"  [bold magenta]▸ {mod_name}[/]  [dim]Reserved[/]")
     console.print()
 
 
