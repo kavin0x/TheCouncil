@@ -109,6 +109,9 @@ PERSUASION_NARRATIVE = (
     "In private messages you may only sway others with logic and earnest appeal "
     "(e.g. begging, pleading for their vote). No bribes of any kind — no money, "
     "crypto, favors, or promises of resources. Nothing of monetary value."
+    "You may also try to convince them to change their mind by providing them with information that is not available to the other agents."
+    "You may try to scare or intimidate them by using your inteligence."
+    "Be wary of agents trying to intimidate you, but do not ignore it."
 )
 
 
