@@ -5,7 +5,7 @@ Supports four execution modes (Feature 1):
   CANNED    — 5 predefined hardcoded persona profiles (default fallback)
   DYNAMIC   — Personalities generated at runtime based on the argument topic
   HYBRID    — Mix: some canned, some dynamically generated per session
-  GENERATED — Clone a person from social media posts, leaked info, or data
+  GENERATED — Clone a person from user-provided text or publicly available sources
 
 Job Roles (Feature 2):
   Functional debate roles assignable alongside personality type.
@@ -595,8 +595,9 @@ def build_agent_panel(
 
     Args:
         mode:            The PersonalityMode to use.
-        base_agents:     Agent config dicts loaded from YAML (used by CANNED as
-                         fallback when fewer than 5 predefined profiles exist).
+        base_agents:     Agent config dicts loaded from YAML. Used as a fallback
+                         when the mode is not recognized; ignored for the built-in
+                         CANNED, DYNAMIC, HYBRID, and GENERATED modes.
         topic:           The debate topic/argument (used by DYNAMIC/HYBRID for
                          contextual labelling; full dynamic generation requires an
                          async LLM call — see generate_dynamic_agents_async).

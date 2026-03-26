@@ -250,12 +250,29 @@ class LLMGuardrailBackend(GuardrailBackend):
         self._model = model
 
     def screen(self, text: str) -> list[GuardrailViolation]:
-        """Synchronous wrapper — runs the async method in a new event loop."""
+        """Synchronous wrapper — runs the async method in a new event loop.
+
+        Note:
+            This method must not be called from within an existing asyncio
+            event loop. In async contexts, use ``await screen_async(...)``
+            instead.
+        """
         import asyncio
+        coro = self.screen_async(text)
         try:
-            return asyncio.run(self.screen_async(text))
+            return asyncio.run(coro)
+        except RuntimeError as exc:
+            # asyncio.run() raises RuntimeError if called from within a running
+            # event loop. Close the coroutine to avoid ResourceWarning, then
+            # re-raise with a clear message so callers don't silently bypass
+            # guardrails; they should use the async API instead.
+            coro.close()
+            raise RuntimeError(
+                "LLMGuardrailBackend.screen() cannot be used inside a running "
+                "asyncio event loop; use 'await screen_async(...)' instead."
+            ) from exc
         except Exception:
-            return []  # Fail open
+            return []  # Fail open on non-event-loop errors
 
     async def screen_async(self, text: str) -> list[GuardrailViolation]:
         """Async LLM classification."""

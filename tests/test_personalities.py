@@ -242,20 +242,34 @@ class TestBuildAgentPanel:
     def test_generated_mode_with_data(self):
         """GENERATED mode with person data creates agents from that data."""
         data = [
-            {"name": "Elon Musk", "data": "Tweets about rockets, Mars, free speech.", "color": "blue"},
-            {"name": "Warren Buffett", "data": "Known for value investing and folksy wisdom.", "color": "green"},
+            {
+                "name": "Zara Helios",
+                "data": "Fictional entrepreneur obsessed with starships, orbital habitats, and open debate.",
+                "color": "blue",
+            },
+            {
+                "name": "Magnus Evergreen",
+                "data": "Fictional long-term investor known for patient strategies and quirky parables.",
+                "color": "green",
+            },
         ]
         panel = build_agent_panel(PersonalityMode.GENERATED, [], generated_data=data)
         assert len(panel) == 2
         names = [p["name"] for p in panel]
-        assert "Elon Musk" in names
-        assert "Warren Buffett" in names
+        assert "Zara Helios" in names
+        assert "Magnus Evergreen" in names
 
     def test_generated_mode_system_prompt_contains_name(self):
         """GENERATED personas have their name in their system prompt."""
-        data = [{"name": "Ada Lovelace", "data": "Pioneer of computing.", "color": "cyan"}]
+        data = [
+            {
+                "name": "Lyra Quill",
+                "data": "Fictional pioneer of mechanical computation and analytical engines.",
+                "color": "cyan",
+            }
+        ]
         panel = build_agent_panel(PersonalityMode.GENERATED, [], generated_data=data)
-        assert "Ada Lovelace" in panel[0]["system_prompt"]
+        assert "Lyra Quill" in panel[0]["system_prompt"]
 
     def test_mode_isolation(self):
         """Different modes return distinct agent sets."""
