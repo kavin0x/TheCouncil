@@ -38,7 +38,6 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 import yaml
 from dotenv import load_dotenv
@@ -49,13 +48,12 @@ from rich.rule import Rule
 from rich.text import Text
 from rich.theme import Theme
 
-from guardrails import Guardrails, GuardrailResult, RegexGuardrailBackend
+from guardrails import Guardrails
 from personalities import (
     JobRole,
     JOB_ROLE_INSTRUCTIONS,
     PersonalityMode,
     build_agent_panel,
-    generate_mbti_personality,
     get_canned_personalities,
     DYNAMIC_GENERATION_PROMPT,
     parse_dynamic_agents,
@@ -184,10 +182,12 @@ def _dicts_to_agents(agent_dicts: list[dict]) -> list[Agent]:
 
         system_prompt = textwrap.dedent(a["system_prompt"]).strip()
 
-        # Inject job-role instructions if a role is assigned (Feature 2)
-        if job_role is not None and JOB_ROLE_INSTRUCTIONS.get(job_role):
-            role_instruction = JOB_ROLE_INSTRUCTIONS[job_role]
-            system_prompt = system_prompt + "\n\n" + role_instruction
+        # Inject job-role instructions if a role is assigned and not already present
+        # (avoids duplication when generate_mbti_personality already injected it)
+        if job_role is not None:
+            role_instruction = JOB_ROLE_INSTRUCTIONS.get(job_role)
+            if role_instruction and role_instruction not in system_prompt:
+                system_prompt = system_prompt + "\n\n" + role_instruction
 
         agents.append(Agent(
             name=a["name"],
@@ -1200,6 +1200,7 @@ async def run_dm_session(
     agent_name: str,
     config_path: Path,
     personality_mode: PersonalityMode | None = None,
+    guardrails_enabled: bool = True,
 ) -> None:
     """
     Run a private 1-on-1 DM session between the user and a single named agent.
@@ -1258,7 +1259,7 @@ async def run_dm_session(
         )
     )
 
-    guardrails = Guardrails()
+    guardrails = Guardrails() if guardrails_enabled else None
 
     while True:
         console.print()
@@ -1301,12 +1302,13 @@ async def run_dm_session(
             continue
 
         # Guardrails check on user message
-        gr = guardrails.screen(user_input)
-        if gr.blocked:
-            console.print(
-                Panel(gr.summary(), title="[bold red]🚫 Message Blocked[/]", border_style="red")
-            )
-            continue
+        if guardrails is not None:
+            gr = guardrails.screen(user_input)
+            if gr.blocked:
+                console.print(
+                    Panel(gr.summary(), title="[bold red]🚫 Message Blocked[/]", border_style="red")
+                )
+                continue
 
         history.append({"role": "user", "content": user_input})
 
@@ -1395,6 +1397,7 @@ def main() -> None:
               python council.py --mode canned "Should we raise prices?"
               python council.py --mode dynamic "What is the future of AI regulation?"
               python council.py --mode hybrid "Should we go open-source?"
+              python council.py --mode generated --people people.json "What should we build?"
               python council.py --dm "The Skeptic" --mode canned
               python council.py --list-agents
               python council.py --no-guardrails "My question"
@@ -1417,7 +1420,19 @@ def main() -> None:
         metavar="MODE",
         help=(
             "Personality mode: canned (5 predefined), dynamic (LLM-generated), "
-            "hybrid (mix), generated (clone from data). Default: use agents.yaml."
+            "hybrid (mix), generated (clone personas from a JSON file, see --people). "
+            "Default: use agents.yaml."
+        ),
+    )
+    parser.add_argument(
+        "--people",
+        type=Path,
+        default=None,
+        metavar="FILE",
+        help=(
+            "Path to a JSON file for --mode generated. The file must contain a list "
+            'of objects with at minimum {"name": "...", "data": "..."} keys. '
+            "data should be publicly available text describing the person."
         ),
     )
     parser.add_argument(
@@ -1448,13 +1463,37 @@ def main() -> None:
     if args.mode:
         pmode = PersonalityMode(args.mode)
 
+    # Load generated_data from --people JSON file if provided
+    generated_data: list[dict] | None = None
+    if args.people:
+        import json
+        try:
+            with open(args.people) as f:
+                generated_data = json.load(f)
+        except (OSError, json.JSONDecodeError) as exc:
+            console.print(
+                Panel(
+                    f"[bold red]Could not load --people file '{args.people}':[/]\n{exc}",
+                    title="File Error",
+                    border_style="red",
+                )
+            )
+            sys.exit(1)
+
     if args.list_agents:
         list_agents(args.config, pmode)
         return
 
     # DM Mode (Feature 4)
     if args.dm:
-        asyncio.run(run_dm_session(args.dm, args.config, personality_mode=pmode))
+        asyncio.run(
+            run_dm_session(
+                args.dm,
+                args.config,
+                personality_mode=pmode,
+                guardrails_enabled=args.guardrails,
+            )
+        )
         return
 
     if args.question:
@@ -1464,6 +1503,7 @@ def main() -> None:
                 args.config,
                 personality_mode=pmode,
                 guardrails_enabled=args.guardrails,
+                generated_data=generated_data,
             )
         )
     else:
