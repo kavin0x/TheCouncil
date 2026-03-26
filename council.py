@@ -11,11 +11,22 @@ Round structure:
           If tied for first, non-winners are dropped and a tie-breaker debate runs on the tied set.
           Vote again; repeat until one resolution wins. Final resolution presented to user.
 
+Personality modes (--mode):
+  canned    — 5 predefined hardcoded personas (default when --mode not set with --config)
+  dynamic   — personas generated at runtime from the debate topic via LLM
+  hybrid    — mix of canned + dynamic personas
+  generated — clone a real person from supplied data (use with --person)
+
 Usage:
     python council.py
     python council.py "Is this auth design secure?"
     python council.py --config my_panel.yaml "Should I pivot?"
+    python council.py --mode canned "Should we raise prices?"
+    python council.py --mode dynamic "What is the future of AI regulation?"
+    python council.py --mode hybrid "Should we go open-source?"
+    python council.py --dm "The Skeptic" "What do you personally think about AI safety?"
     python council.py --list-agents
+    python council.py --no-guardrails "My question"
 """
 
 import argparse
@@ -36,6 +47,17 @@ from rich.panel import Panel
 from rich.rule import Rule
 from rich.text import Text
 from rich.theme import Theme
+
+from guardrails import Guardrails
+from personalities import (
+    JobRole,
+    JOB_ROLE_INSTRUCTIONS,
+    PersonalityMode,
+    build_agent_panel,
+    get_canned_personalities,
+    DYNAMIC_GENERATION_PROMPT,
+    parse_dynamic_agents,
+)
 
 load_dotenv()
 
@@ -83,6 +105,7 @@ class Agent:
     system_prompt: str
     color: str = "cyan"
     model: str | None = None  # OpenRouter model; if unset, uses session.model
+    job_role: JobRole | None = None  # Optional functional debate role (Feature 2)
 
     @property
     def rich_color(self) -> str:
@@ -138,17 +161,43 @@ class DebateSession:
 def load_config(config_path: Path) -> tuple[list[Agent], dict]:
     with open(config_path) as f:
         raw = yaml.safe_load(f)
-    agents = [
-        Agent(
+    agents = _dicts_to_agents(raw.get("agents", []))
+    return agents, raw.get("settings", {})
+
+
+def _dicts_to_agents(agent_dicts: list[dict]) -> list[Agent]:
+    """Convert a list of agent config dicts (from YAML or personalities module) to Agent objects."""
+    agents = []
+    for a in agent_dicts:
+        # Resolve optional job_role
+        job_role_raw = a.get("job_role")
+        job_role: JobRole | None = None
+        if isinstance(job_role_raw, JobRole):
+            job_role = job_role_raw
+        elif isinstance(job_role_raw, str):
+            for jr in JobRole:
+                if jr.value.lower() == job_role_raw.lower() or jr.name.lower() == job_role_raw.lower():
+                    job_role = jr
+                    break
+
+        system_prompt = textwrap.dedent(a["system_prompt"]).strip()
+
+        # Inject job-role instructions if a role is assigned and not already present
+        # (avoids duplication when generate_mbti_personality already injected it)
+        if job_role is not None:
+            role_instruction = JOB_ROLE_INSTRUCTIONS.get(job_role)
+            if role_instruction and role_instruction not in system_prompt:
+                system_prompt = system_prompt + "\n\n" + role_instruction
+
+        agents.append(Agent(
             name=a["name"],
             role=a["role"],
-            system_prompt=textwrap.dedent(a["system_prompt"]).strip(),
+            system_prompt=system_prompt,
             color=a.get("color", "cyan"),
             model=a.get("model"),
-        )
-        for a in raw.get("agents", [])
-    ]
-    return agents, raw.get("settings", {})
+            job_role=job_role,
+        ))
+    return agents
 
 
 _openrouter_client: AsyncOpenAI | None = None
@@ -811,8 +860,79 @@ async def _agent_vote_for_one_resolution(
 # Main session
 # ---------------------------------------------------------------------------
 
-async def run_council(question: str, config_path: Path) -> None:
-    agents, settings = load_config(config_path)
+
+async def _generate_dynamic_agents(topic: str, n: int, model: str) -> list[Agent]:
+    """Use the LLM to generate ``n`` dynamic agent personas for the given topic."""
+    prompt = DYNAMIC_GENERATION_PROMPT.format(topic=topic, n=n)
+    input_msgs = [{"role": "user", "content": prompt}]
+    raw = await api_call(input_msgs, max_tokens=2000, model=model)
+    agent_dicts = parse_dynamic_agents(raw)
+    if not agent_dicts:
+        # Fallback to canned if LLM didn't return parseable agents
+        agent_dicts = get_canned_personalities()
+    return _dicts_to_agents(agent_dicts)
+
+
+async def run_council(
+    question: str,
+    config_path: Path,
+    personality_mode: PersonalityMode | None = None,
+    guardrails_enabled: bool = True,
+    generated_data: list[dict] | None = None,
+) -> None:
+    """
+    Run a full Council debate session.
+
+    Args:
+        question:          The argument/question put to the council.
+        config_path:       Path to agents.yaml (used when personality_mode is None).
+        personality_mode:  If set, overrides the agent panel with the chosen mode.
+                           None means use the YAML config as-is (existing behaviour).
+        guardrails_enabled: Screen the question through guardrails before proceeding.
+        generated_data:    For PersonalityMode.GENERATED — list of person dicts.
+    """
+    # ── GUARDRAILS (Feature 5) ────────────────────────────────────────────
+    if guardrails_enabled:
+        guardrails = Guardrails()
+        result = guardrails.screen(question)
+        if result.blocked:
+            console.print()
+            console.print(
+                Panel(
+                    result.summary(),
+                    title="[bold red]🚫 Input Blocked by Guardrails[/]",
+                    border_style="red",
+                    padding=(1, 2),
+                )
+            )
+            console.print()
+            return
+
+    base_agents, settings = load_config(config_path)
+    default_model = settings.get("model", MODEL)
+
+    # ── PERSONALITY MODE (Feature 1) ──────────────────────────────────────
+    if personality_mode is None:
+        agents = base_agents
+    elif personality_mode == PersonalityMode.DYNAMIC:
+        console.print("\n[dim]Generating dynamic agent personas for this topic…[/]\n")
+        agents = await _generate_dynamic_agents(question, n=5, model=default_model)
+    elif personality_mode == PersonalityMode.GENERATED:
+        agent_dicts = build_agent_panel(
+            PersonalityMode.GENERATED,
+            base_agents=[],
+            topic=question,
+            generated_data=generated_data,
+        )
+        agents = _dicts_to_agents(agent_dicts)
+    else:
+        # CANNED or HYBRID — synchronous panel build
+        agent_dicts = build_agent_panel(
+            personality_mode,
+            base_agents=[a.__dict__ for a in base_agents],
+            topic=question,
+        )
+        agents = _dicts_to_agents(agent_dicts)
 
     if not agents:
         console.print("[bold red]No agents defined in config.[/]")
@@ -1016,21 +1136,227 @@ async def run_council(question: str, config_path: Path) -> None:
 # CLI
 # ---------------------------------------------------------------------------
 
-def list_agents(config_path: Path) -> None:
-    agents, _ = load_config(config_path)
+def list_agents(config_path: Path, personality_mode: PersonalityMode | None = None) -> None:
+    if personality_mode == PersonalityMode.CANNED:
+        agents = _dicts_to_agents(get_canned_personalities())
+    else:
+        agents, _ = load_config(config_path)
     console.print()
     console.print(Panel("[bold]Configured Agents[/]", border_style="blue"))
     for a in agents:
-        console.print(f"  [{a.rich_color}]▸ {a.name}[/]  [dim]{a.role}[/]")
+        role_str = a.role
+        if a.job_role:
+            role_str += f"  [{a.job_role.value}]"
+        console.print(f"  [{a.rich_color}]▸ {a.name}[/]  [dim]{role_str}[/]")
     console.print()
 
 
-def interactive_mode(config_path: Path) -> None:
+# ---------------------------------------------------------------------------
+# DM Mode — user ↔ single agent 1-on-1 (Feature 4)
+# ---------------------------------------------------------------------------
+
+_USER_DM_SYSTEM_SUFFIX = (
+    "\n\nYou are currently in a PRIVATE DIRECT MESSAGE conversation with the user. "
+    "This is outside the main council debate. Respond directly and personally as "
+    "yourself. Be candid, thoughtful, and in-character. Keep responses focused and "
+    "conversational (100-200 words unless the topic demands more)."
+)
+
+_USER_DM_INVITE_SYSTEM = (
+    "\n\nYou are in a PRIVATE GROUP CHAT. Respond naturally in the conversation, "
+    "staying in character. Keep responses concise and conversational."
+)
+
+
+async def _dm_agent_response(
+    agent: Agent,
+    history: list[dict],
+    model: str,
+) -> str:
+    """Get a single agent response in a DM conversation."""
+    system_prompt = agent.system_prompt + _USER_DM_SYSTEM_SUFFIX
+    input_msgs = [{"role": "system", "content": system_prompt}] + history
+    return (await api_call(input_msgs, max_tokens=512, model=model)).strip()
+
+
+async def _group_chat_response(
+    agents: list[Agent],
+    history: list[dict],
+    model: str,
+) -> list[tuple[Agent, str]]:
+    """Get responses from all agents in a group chat round (async parallel)."""
+
+    async def _one(agent: Agent) -> tuple[Agent, str]:
+        system_prompt = agent.system_prompt + _USER_DM_INVITE_SYSTEM
+        input_msgs = [{"role": "system", "content": system_prompt}] + history
+        text = (await api_call(input_msgs, max_tokens=300, model=agent.model or model)).strip()
+        return agent, text
+
+    results = await asyncio.gather(*[_one(a) for a in agents])
+    return list(results)
+
+
+async def run_dm_session(
+    agent_name: str,
+    config_path: Path,
+    personality_mode: PersonalityMode | None = None,
+    guardrails_enabled: bool = True,
+) -> None:
+    """
+    Run a private 1-on-1 DM session between the user and a single named agent.
+
+    The user can invite additional agents mid-session by typing:
+      /invite <agent name>
+
+    Type 'quit' / 'exit' / 'q' to end the session.
+    """
+    base_agents, settings = load_config(config_path)
+    default_model = settings.get("model", MODEL)
+
+    # Build agent pool according to personality mode
+    if personality_mode is not None:
+        agent_dicts = build_agent_panel(
+            personality_mode,
+            base_agents=[a.__dict__ for a in base_agents],
+        )
+        all_agents = _dicts_to_agents(agent_dicts)
+    else:
+        all_agents = base_agents
+
+    # Find the primary agent by name (case-insensitive, partial match)
+    primary: Agent | None = None
+    for a in all_agents:
+        if agent_name.lower() in a.name.lower() or a.name.lower() in agent_name.lower():
+            primary = a
+            break
+
+    if primary is None:
+        console.print(
+            Panel(
+                f"[bold red]Agent '{agent_name}' not found.[/]\n\n"
+                f"Available agents: {', '.join(a.name for a in all_agents)}",
+                title="DM Error",
+                border_style="red",
+            )
+        )
+        return
+
+    active_agents: list[Agent] = [primary]
+    history: list[dict] = []
+    is_group = False
+
     console.print()
     console.print(
         Panel(
+            f"[bold]Private DM with {primary.name}[/]\n"
+            f"[dim]{primary.role}[/]\n\n"
+            "[dim]Type your message. "
+            "Use [bold]/invite <name>[/] to add an agent. "
+            "Type [bold]quit[/] to exit.[/]",
+            border_style="blue",
+            title="[bold blue]DM Mode[/]",
+            padding=(1, 2),
+        )
+    )
+
+    guardrails = Guardrails() if guardrails_enabled else None
+
+    while True:
+        console.print()
+        try:
+            user_input = console.input("[bold green]You >[/] ").strip()
+        except (EOFError, KeyboardInterrupt):
+            console.print("\n[dim]Exiting DM.[/]")
+            break
+
+        if user_input.lower() in ("quit", "exit", "q"):
+            console.print("[dim]Exiting DM.[/]")
+            break
+
+        if not user_input:
+            continue
+
+        # /invite command — add agent to group chat (Feature 4: Invite)
+        if user_input.lower().startswith("/invite "):
+            invite_name = user_input[8:].strip()
+            invited: Agent | None = None
+            for a in all_agents:
+                if invite_name.lower() in a.name.lower() or a.name.lower() in invite_name.lower():
+                    invited = a
+                    break
+            if invited is None:
+                console.print(f"  [dim]Agent '{invite_name}' not found.[/]")
+                continue
+            if any(a.name == invited.name for a in active_agents):
+                console.print(f"  [dim]{invited.name} is already in this chat.[/]")
+                continue
+            active_agents.append(invited)
+            is_group = True
+            console.print(
+                f"  [dim]📨 {invited.name} has been invited to the conversation.[/]"
+            )
+            history.append({
+                "role": "user",
+                "content": f"[System: {invited.name} has joined the conversation.]",
+            })
+            continue
+
+        # Guardrails check on user message
+        if guardrails is not None:
+            gr = guardrails.screen(user_input)
+            if gr.blocked:
+                console.print(
+                    Panel(gr.summary(), title="[bold red]🚫 Message Blocked[/]", border_style="red")
+                )
+                continue
+
+        history.append({"role": "user", "content": user_input})
+
+        if is_group or len(active_agents) > 1:
+            # Group chat — all active agents respond
+            responses = await _group_chat_response(active_agents, history, default_model)
+            group_content_parts = []
+            for agent, text in responses:
+                console.print()
+                console.rule(Text(f"  {agent.name}  ·  {agent.role}  ", style=agent.rich_color))
+                console.print()
+                console.print(text, markup=False)
+                console.print()
+                group_content_parts.append(f"{agent.name}: {text}")
+            # Append all agent responses as a single assistant turn
+            history.append({
+                "role": "assistant",
+                "content": "\n\n".join(group_content_parts),
+            })
+        else:
+            # 1-on-1 DM
+            console.print()
+            console.rule(Text(f"  {primary.name}  ·  {primary.role}  ", style=primary.rich_color))
+            console.print()
+            response = await _dm_agent_response(
+                primary, history, primary.model or default_model
+            )
+            console.print(response, markup=False)
+            console.print()
+            history.append({"role": "assistant", "content": response})
+
+
+# ---------------------------------------------------------------------------
+# Interactive mode
+# ---------------------------------------------------------------------------
+
+def interactive_mode(
+    config_path: Path,
+    personality_mode: PersonalityMode | None = None,
+    guardrails_enabled: bool = True,
+) -> None:
+    console.print()
+    mode_label = f"  Mode: [bold]{personality_mode.value}[/]" if personality_mode else ""
+    console.print(
+        Panel(
             "[bold]Council — Interactive Mode[/]\n"
-            "[dim]Type your question and press Enter. Type [bold]quit[/] to exit.[/]",
+            "[dim]Type your question and press Enter. Type [bold]quit[/] to exit.[/]"
+            + (f"\n{mode_label}" if mode_label else ""),
             border_style="blue",
         )
     )
@@ -1048,7 +1374,14 @@ def interactive_mode(config_path: Path) -> None:
         if not question:
             continue
 
-        asyncio.run(run_council(question, config_path))
+        asyncio.run(
+            run_council(
+                question,
+                config_path,
+                personality_mode=personality_mode,
+                guardrails_enabled=guardrails_enabled,
+            )
+        )
 
 
 def main() -> None:
@@ -1061,7 +1394,13 @@ def main() -> None:
               python council.py "Is this JWT auth design secure?"
               python council.py "Should I use PostgreSQL or MongoDB?"
               python council.py --config my_panel.yaml "What tech stack should I choose?"
+              python council.py --mode canned "Should we raise prices?"
+              python council.py --mode dynamic "What is the future of AI regulation?"
+              python council.py --mode hybrid "Should we go open-source?"
+              python council.py --mode generated --people people.json "What should we build?"
+              python council.py --dm "The Skeptic" --mode canned
               python council.py --list-agents
+              python council.py --no-guardrails "My question"
             """
         ),
     )
@@ -1074,17 +1413,101 @@ def main() -> None:
         help="Path to agents YAML config (default: agents.yaml)",
     )
     parser.add_argument("--list-agents", action="store_true", help="List configured agents")
+    parser.add_argument(
+        "--mode",
+        choices=["canned", "dynamic", "hybrid", "generated"],
+        default=None,
+        metavar="MODE",
+        help=(
+            "Personality mode: canned (5 predefined), dynamic (LLM-generated), "
+            "hybrid (mix), generated (clone personas from a JSON file, see --people). "
+            "Default: use agents.yaml."
+        ),
+    )
+    parser.add_argument(
+        "--people",
+        type=Path,
+        default=None,
+        metavar="FILE",
+        help=(
+            "Path to a JSON file for --mode generated. The file must contain a list "
+            'of objects with at minimum {"name": "...", "data": "..."} keys. '
+            "data should be publicly available text describing the person."
+        ),
+    )
+    parser.add_argument(
+        "--dm",
+        metavar="AGENT_NAME",
+        default=None,
+        help="Start a private 1-on-1 DM session with the named agent (Feature 4).",
+    )
+    guardrail_group = parser.add_mutually_exclusive_group()
+    guardrail_group.add_argument(
+        "--guardrails",
+        dest="guardrails",
+        action="store_true",
+        default=True,
+        help="Enable input guardrails (default: on).",
+    )
+    guardrail_group.add_argument(
+        "--no-guardrails",
+        dest="guardrails",
+        action="store_false",
+        help="Disable input guardrails.",
+    )
 
     args = parser.parse_args()
 
+    # Resolve personality mode
+    pmode: PersonalityMode | None = None
+    if args.mode:
+        pmode = PersonalityMode(args.mode)
+
+    # Load generated_data from --people JSON file if provided
+    generated_data: list[dict] | None = None
+    if args.people:
+        import json
+        try:
+            with open(args.people) as f:
+                generated_data = json.load(f)
+        except (OSError, json.JSONDecodeError) as exc:
+            console.print(
+                Panel(
+                    f"[bold red]Could not load --people file '{args.people}':[/]\n{exc}",
+                    title="File Error",
+                    border_style="red",
+                )
+            )
+            sys.exit(1)
+
     if args.list_agents:
-        list_agents(args.config)
+        list_agents(args.config, pmode)
+        return
+
+    # DM Mode (Feature 4)
+    if args.dm:
+        asyncio.run(
+            run_dm_session(
+                args.dm,
+                args.config,
+                personality_mode=pmode,
+                guardrails_enabled=args.guardrails,
+            )
+        )
         return
 
     if args.question:
-        asyncio.run(run_council(args.question, args.config))
+        asyncio.run(
+            run_council(
+                args.question,
+                args.config,
+                personality_mode=pmode,
+                guardrails_enabled=args.guardrails,
+                generated_data=generated_data,
+            )
+        )
     else:
-        interactive_mode(args.config)
+        interactive_mode(args.config, personality_mode=pmode, guardrails_enabled=args.guardrails)
 
 
 if __name__ == "__main__":
