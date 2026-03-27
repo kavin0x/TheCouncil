@@ -31,7 +31,9 @@ Usage:
 
 import argparse
 import asyncio
+import json
 import os
+import re
 import sys
 import textwrap
 import time
@@ -64,9 +66,11 @@ from personalities import (
 load_dotenv()
 
 MODEL = "x-ai/grok-4.20-multi-agent-beta"
+PROFILE_BUILDER_MODEL = "x-ai/grok-4-1-fast-non-reasoning"
 API_BASE = "https://openrouter.ai/api/v1"
 XAI_API_BASE = "https://api.x.ai/v1"
 DEFAULT_CONFIG = Path(__file__).parent / "agents.yaml"
+DEFAULT_GENERATED_PEOPLE_FILE = Path(__file__).parent / "sessions" / "generated_people.json"
 
 # Map OpenRouter x-ai model IDs to native XAI model IDs (for direct XAI API)
 XAI_MODEL_MAP = {
@@ -203,6 +207,49 @@ def _dicts_to_agents(agent_dicts: list[dict]) -> list[Agent]:
     return agents
 
 
+def _build_generated_agents(generated_data: list[dict] | None, topic: str = "") -> list[Agent]:
+    """Build Agent objects from generated persona data.
+
+    Returns an empty list when no generated data is provided.
+    """
+    if not generated_data:
+        return []
+
+    agent_dicts = build_agent_panel(
+        PersonalityMode.GENERATED,
+        base_agents=[],
+        topic=topic,
+        generated_data=generated_data,
+    )
+    return _dicts_to_agents(agent_dicts)
+
+
+def _merge_agents_prefer_first(*groups: list[Agent]) -> list[Agent]:
+    """Merge agent groups by name (case-insensitive), preserving first occurrence."""
+    merged: list[Agent] = []
+    seen_names: set[str] = set()
+
+    for group in groups:
+        for agent in group:
+            key = agent.name.strip().casefold()
+            if key in seen_names:
+                continue
+            seen_names.add(key)
+            merged.append(agent)
+
+    return merged
+
+
+def _resolve_default_agents(
+    base_agents: list[Agent],
+    generated_data: list[dict] | None,
+    topic: str = "",
+) -> list[Agent]:
+    """Default panel: YAML agents plus active generated personas appended."""
+    generated_agents = _build_generated_agents(generated_data, topic=topic)
+    return _merge_agents_prefer_first(base_agents, generated_agents)
+
+
 _openrouter_client: AsyncOpenAI | None = None
 _xai_client: AsyncOpenAI | None = None
 
@@ -258,6 +305,688 @@ def get_client_for_model(model: str) -> tuple[AsyncOpenAI, str]:
     if model in XAI_MODEL_MAP and os.getenv("XAI_API_KEY"):
         return _get_xai_client(), XAI_MODEL_MAP[model]
     return _get_openrouter_client(), model
+
+
+def load_generated_people(path: Path) -> list[dict]:
+    """Load generated persona entries from disk.
+
+    Returns an empty list when file does not exist.
+    Raises ValueError when file shape is invalid.
+    """
+    if not path.exists():
+        return []
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Could not load people file '{path}': {exc}") from exc
+
+    if not isinstance(data, list):
+        raise ValueError("People file must contain a JSON array of person objects.")
+
+    for idx, person in enumerate(data):
+        if not isinstance(person, dict):
+            raise ValueError(f"Person at index {idx} is not an object.")
+        if "name" not in person or "data" not in person:
+            raise ValueError(
+                f"Person at index {idx} must include 'name' and 'data' fields."
+            )
+        if "active" in person and not isinstance(person["active"], bool):
+            raise ValueError(
+                f"Person at index {idx} has non-boolean 'active'. Use true or false."
+            )
+    return data
+
+
+def save_generated_people(path: Path, people: list[dict]) -> None:
+    """Write generated personas to disk in a stable JSON format."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(people, f, indent=2, ensure_ascii=True)
+        f.write("\n")
+
+
+def _resolve_people_path(path_from_cli: Path | None) -> Path:
+    return path_from_cli or DEFAULT_GENERATED_PEOPLE_FILE
+
+
+def _extract_json_object(raw: str) -> dict:
+    """Extract and parse the first JSON object from model output."""
+    text = raw.strip()
+    fenced_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.S)
+    if fenced_match:
+        text = fenced_match.group(1).strip()
+
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            raise ValueError("Model did not return a valid JSON object.")
+        parsed = json.loads(text[start : end + 1])
+
+    if not isinstance(parsed, dict):
+        raise ValueError("Model output JSON must be an object.")
+    return parsed
+
+
+def _ask_text(question: str, *, allow_empty: bool = False) -> str:
+    while True:
+        answer = console.input(question).strip()
+        if answer or allow_empty:
+            return answer
+        console.print("[dim]Please enter a value.[/]")
+
+
+def _ask_yes_no(question: str, default_yes: bool = True) -> bool:
+    suffix = "[Y/n]" if default_yes else "[y/N]"
+    while True:
+        answer = console.input(f"{question} {suffix} ").strip().lower()
+        if not answer:
+            return default_yes
+        if answer in {"y", "yes"}:
+            return True
+        if answer in {"n", "no"}:
+            return False
+        console.print("[dim]Please answer yes or no.[/]")
+
+
+def _ask_choice(question: str, options: list[str], default: str | None = None) -> str:
+    option_text = "/".join(options)
+    default_suffix = f" [{default}]" if default else ""
+    valid = {opt.lower(): opt for opt in options}
+    while True:
+        answer = console.input(f"{question} ({option_text}){default_suffix}: ").strip().lower()
+        if not answer and default:
+            return default
+        if answer in valid:
+            return valid[answer]
+        console.print(f"[dim]Choose one of: {', '.join(options)}[/]")
+
+
+def _ask_list(question: str, *, minimum_items: int = 1, allow_empty: bool = False) -> list[str]:
+    while True:
+        raw = console.input(question).strip()
+        if not raw and allow_empty:
+            return []
+        values = [v.strip() for v in raw.split(",") if v.strip()]
+        if len(values) >= minimum_items:
+            return values
+        if allow_empty and not raw:
+            return []
+        console.print(
+            f"[dim]Please provide at least {minimum_items} item(s), comma-separated.[/]"
+        )
+
+
+def _ask_multiline(question: str, *, min_chars: int = 0, allow_empty: bool = False) -> str:
+    console.print(question)
+    console.print("[dim]Enter one or more lines. Submit an empty line to finish.[/]")
+    lines: list[str] = []
+    while True:
+        line = console.input("  > ")
+        if not line.strip() and lines:
+            break
+        if not line.strip() and not lines and allow_empty:
+            return ""
+        lines.append(line)
+    text = "\n".join(lines).strip()
+    if len(text) < min_chars and not (allow_empty and not text):
+        console.print(f"[dim]Please provide at least {min_chars} characters.[/]")
+        return _ask_multiline(question, min_chars=min_chars, allow_empty=allow_empty)
+    return text
+
+
+def _normalize_mbti(value: str) -> str | None:
+    v = value.strip().upper()
+    if not v:
+        return None
+    if re.fullmatch(r"[IE][NS][FT][JP]", v):
+        return v
+    return None
+
+
+def _collect_attachments_interactive() -> dict[str, Any]:
+    """Collect file, directory, URL, and manual text attachments.
+
+    This is a CLI-friendly substitute for file uploads.
+    """
+    max_files = 20
+    max_chars_per_file = 8000
+    file_entries: list[dict[str, Any]] = []
+    link_entries: list[dict[str, str]] = []
+    manual_entries: list[dict[str, str]] = []
+
+    console.print()
+    console.print(
+        Panel(
+            "[bold]Attachments[/]\n"
+            "[dim]You can attach local files/directories, add URLs, and paste excerpts. "
+            "For directories, up to 20 text files are ingested.[/]",
+            border_style="blue",
+        )
+    )
+
+    while len(file_entries) < max_files:
+        path_raw = _ask_text(
+            "File or directory path to attach (blank to continue): ", allow_empty=True
+        )
+        if not path_raw:
+            break
+
+        path = Path(path_raw).expanduser()
+        if not path.is_absolute():
+            path = (Path.cwd() / path).resolve()
+        if not path.exists():
+            console.print(f"[dim]Path does not exist: {path}[/]")
+            continue
+
+        candidates: list[Path]
+        if path.is_dir():
+            all_files = [p for p in path.rglob("*") if p.is_file()]
+            candidates = all_files[: max_files - len(file_entries)]
+        else:
+            candidates = [path]
+
+        for file_path in candidates:
+            if len(file_entries) >= max_files:
+                break
+            try:
+                raw = file_path.read_text(encoding="utf-8", errors="ignore")
+            except OSError as exc:
+                file_entries.append({
+                    "path": str(file_path),
+                    "read_ok": False,
+                    "error": str(exc),
+                    "char_count": 0,
+                    "excerpt": "",
+                })
+                continue
+            excerpt = raw[:max_chars_per_file]
+            file_entries.append({
+                "path": str(file_path),
+                "read_ok": True,
+                "error": "",
+                "char_count": len(raw),
+                "excerpt": excerpt,
+            })
+
+    while True:
+        url = _ask_text("URL/social post link to attach (blank to continue): ", allow_empty=True)
+        if not url:
+            break
+        note = _ask_text("Optional note about this link: ", allow_empty=True)
+        link_entries.append({"url": url, "note": note})
+
+    while True:
+        source = _ask_text(
+            "Manual excerpt source label (blank to finish manual excerpts): ",
+            allow_empty=True,
+        )
+        if not source:
+            break
+        excerpt = _ask_multiline(
+            "Paste the excerpt/content to include:",
+            min_chars=20,
+            allow_empty=False,
+        )
+        manual_entries.append({"source": source, "excerpt": excerpt})
+
+    chunks: list[str] = []
+    if file_entries:
+        for entry in file_entries:
+            if entry["read_ok"]:
+                chunks.append(
+                    f"FILE: {entry['path']}\n"
+                    f"TOTAL_CHARS: {entry['char_count']}\n"
+                    "---BEGIN FILE EXCERPT---\n"
+                    f"{entry['excerpt']}\n"
+                    "---END FILE EXCERPT---"
+                )
+            else:
+                chunks.append(
+                    f"FILE: {entry['path']}\nUNREADABLE: {entry['error']}"
+                )
+    if link_entries:
+        chunks.append(
+            "LINKS:\n" + "\n".join(
+                f"- {item['url']}" + (f"  | NOTE: {item['note']}" if item["note"] else "")
+                for item in link_entries
+            )
+        )
+    if manual_entries:
+        for item in manual_entries:
+            chunks.append(
+                f"MANUAL EXCERPT SOURCE: {item['source']}\n"
+                "---BEGIN MANUAL EXCERPT---\n"
+                f"{item['excerpt']}\n"
+                "---END MANUAL EXCERPT---"
+            )
+
+    return {
+        "files": file_entries,
+        "links": link_entries,
+        "manual_excerpts": manual_entries,
+        "context_bundle": "\n\n".join(chunks),
+        "summary": {
+            "file_count": len(file_entries),
+            "link_count": len(link_entries),
+            "manual_excerpt_count": len(manual_entries),
+        },
+    }
+
+
+def _build_full_questionnaire() -> dict[str, Any]:
+    """Run complete branched interview and return a structured questionnaire payload."""
+    console.print()
+    console.print(
+        Panel(
+            "[bold]Questionnaire[/]\n"
+            "[dim]This is a full profile interview. Some questions branch based on your answers.[/]",
+            border_style="blue",
+        )
+    )
+
+    name = _ask_text("Name: ")
+    alias = _ask_text("Alias/handle (optional): ", allow_empty=True)
+    pronouns = _ask_text("Pronouns (optional): ", allow_empty=True)
+    location_context = _ask_text("Region/timezone context (optional): ", allow_empty=True)
+    color = _ask_text(
+        "Preferred color (blue/red/green/yellow/magenta/cyan/gold/white) [cyan]: ",
+        allow_empty=True,
+    ) or "cyan"
+    mbti_input = _ask_text("Known MBTI (optional, e.g. INTJ): ", allow_empty=True)
+    mbti_type = _normalize_mbti(mbti_input)
+
+    primary_domain = _ask_text(
+        "Primary domain (engineering, business, policy, research, design, ops, etc.): "
+    )
+    secondary_domains = _ask_list(
+        "Secondary domains (comma separated, optional): ",
+        minimum_items=1,
+        allow_empty=True,
+    )
+    years_experience = _ask_text("Years of experience (total): ")
+    signature_experiences = _ask_list(
+        "Signature experiences/projects (comma separated, at least 2): ",
+        minimum_items=2,
+    )
+
+    decision_style = _ask_choice(
+        "Primary decision style",
+        ["analytical", "intuitive", "hybrid", "consensus-driven", "first-principles"],
+        default="hybrid",
+    )
+    risk_tolerance = _ask_choice(
+        "Risk tolerance",
+        ["low", "medium", "high"],
+        default="medium",
+    )
+    pace_preference = _ask_choice(
+        "Decision pace",
+        ["deliberate", "balanced", "fast"],
+        default="balanced",
+    )
+
+    branch_answers: dict[str, Any] = {}
+    if risk_tolerance == "high":
+        branch_answers["risk_branch"] = {
+            "failure_recovery": _ask_multiline(
+                "When a risky bet fails, how do you recover and communicate it?",
+                min_chars=60,
+            ),
+            "acceptable_downside": _ask_text("What downside is acceptable for high-upside bets? "),
+        }
+    elif risk_tolerance == "low":
+        branch_answers["risk_branch"] = {
+            "evidence_threshold": _ask_multiline(
+                "What evidence threshold do you need before committing?",
+                min_chars=60,
+            ),
+            "fallback_strategy": _ask_text("What fallback plans do you always prepare? "),
+        }
+    else:
+        branch_answers["risk_branch"] = {
+            "switch_trigger": _ask_multiline(
+                "How do you decide when to move from analysis to action?",
+                min_chars=60,
+            ),
+            "calibration_method": _ask_text("How do you calibrate confidence under uncertainty? "),
+        }
+
+    if pace_preference == "fast":
+        branch_answers["pace_branch"] = {
+            "guardrails": _ask_text("What guardrails prevent rushed mistakes? "),
+        }
+    elif pace_preference == "deliberate":
+        branch_answers["pace_branch"] = {
+            "anti-analysis-paralysis": _ask_text("How do you avoid analysis paralysis? "),
+        }
+    else:
+        branch_answers["pace_branch"] = {
+            "balance_strategy": _ask_text("How do you balance speed and depth in practice? "),
+        }
+
+    leads_people = _ask_yes_no("Do you regularly lead teams or organizations?")
+    if leads_people:
+        branch_answers["leadership_branch"] = {
+            "leadership_style": _ask_text("Leadership style in one line: "),
+            "conflict_handling": _ask_multiline(
+                "How do you handle conflict and underperformance?",
+                min_chars=60,
+            ),
+            "delegation": _ask_text("How do you delegate high-stakes work? "),
+        }
+    else:
+        branch_answers["individual_contributor_branch"] = {
+            "influence_strategy": _ask_multiline(
+                "How do you influence outcomes without formal authority?",
+                min_chars=60,
+            ),
+            "collaboration_pattern": _ask_text("How do you collaborate with leaders/stakeholders? "),
+        }
+
+    domain_key = primary_domain.lower()
+    if any(k in domain_key for k in ["engineer", "software", "ai", "ml", "data"]):
+        branch_answers["domain_branch"] = {
+            "architecture_bias": _ask_text("Preferred architecture bias (simple, modular, experimental, etc.): "),
+            "debt_vs_speed": _ask_multiline("How do you trade off technical debt vs delivery speed?", min_chars=60),
+            "reliability_principles": _ask_text("Top reliability principles you insist on: "),
+        }
+    elif any(k in domain_key for k in ["finance", "ops", "operations", "business"]):
+        branch_answers["domain_branch"] = {
+            "north_star_metric": _ask_text("Primary metric you trust most: "),
+            "efficiency_tradeoffs": _ask_multiline("How do you balance growth vs efficiency?", min_chars=60),
+            "resource_allocation": _ask_text("How do you allocate constrained resources? "),
+        }
+    elif any(k in domain_key for k in ["policy", "regulation", "government", "legal"]):
+        branch_answers["domain_branch"] = {
+            "policy_frame": _ask_text("Policy framing lens you use most: "),
+            "stakeholder_balance": _ask_multiline("How do you balance stakeholder interests under uncertainty?", min_chars=60),
+            "compliance_vs_innovation": _ask_text("How do you handle compliance vs innovation tension? "),
+        }
+    elif any(k in domain_key for k in ["research", "science", "academic"]):
+        branch_answers["domain_branch"] = {
+            "evidence_standard": _ask_text("Evidence standard for accepting claims: "),
+            "hypothesis_strategy": _ask_multiline("How do you design and revise hypotheses?", min_chars=60),
+            "reproducibility": _ask_text("How do you ensure reproducibility or rigor? "),
+        }
+    else:
+        branch_answers["domain_branch"] = {
+            "quality_principle": _ask_text("What principle defines high quality in your craft? "),
+            "creative_tradeoffs": _ask_multiline("How do you balance originality with execution constraints?", min_chars=60),
+            "feedback_model": _ask_text("How do you incorporate critical feedback? "),
+        }
+
+    communication_tone = _ask_text("Communication tone (direct, diplomatic, energetic, etc.): ")
+    communication_no_go = _ask_list(
+        "Communication no-go behaviors (comma separated, optional): ",
+        minimum_items=1,
+        allow_empty=True,
+    )
+    persuasion_style = _ask_text("Persuasion style in debate: ")
+    stress_response = _ask_text("How do you respond under pressure? ")
+    trigger_topics = _ask_list(
+        "Topics that trigger strong reactions (optional, comma separated): ",
+        minimum_items=1,
+        allow_empty=True,
+    )
+
+    core_values = _ask_list("Core values (comma separated, at least 3): ", minimum_items=3)
+    non_negotiables = _ask_list(
+        "Non-negotiables in decision making (comma separated, at least 2): ",
+        minimum_items=2,
+    )
+    ethical_boundaries = _ask_multiline(
+        "Ethical boundaries you will not cross:",
+        min_chars=60,
+    )
+
+    known_topics = _ask_list("Topics you know deeply (comma separated, at least 4): ", minimum_items=4)
+    weak_topics = _ask_list(
+        "Areas where you are weaker (optional, comma separated): ",
+        minimum_items=1,
+        allow_empty=True,
+    )
+    contrarian_views = _ask_multiline(
+        "Strongly held contrarian views (optional):",
+        min_chars=0,
+        allow_empty=True,
+    )
+    debate_goals = _ask_multiline("What outcomes do you optimize for in debates?", min_chars=60)
+    signature_phrases = _ask_list(
+        "Signature phrases/words you often use (optional, comma separated): ",
+        minimum_items=1,
+        allow_empty=True,
+    )
+
+    attachments = _collect_attachments_interactive()
+
+    return {
+        "identity": {
+            "name": name,
+            "alias": alias,
+            "pronouns": pronouns,
+            "location_context": location_context,
+            "color": color,
+            "mbti_type": mbti_type,
+            "primary_domain": primary_domain,
+            "secondary_domains": secondary_domains,
+            "years_experience": years_experience,
+            "signature_experiences": signature_experiences,
+        },
+        "cognition": {
+            "decision_style": decision_style,
+            "risk_tolerance": risk_tolerance,
+            "pace_preference": pace_preference,
+            "stress_response": stress_response,
+        },
+        "communication": {
+            "tone": communication_tone,
+            "persuasion_style": persuasion_style,
+            "no_go_behaviors": communication_no_go,
+            "signature_phrases": signature_phrases,
+        },
+        "values": {
+            "core_values": core_values,
+            "non_negotiables": non_negotiables,
+            "ethical_boundaries": ethical_boundaries,
+        },
+        "knowledge": {
+            "deep_topics": known_topics,
+            "weak_topics": weak_topics,
+            "contrarian_views": contrarian_views,
+            "goals": debate_goals,
+            "trigger_topics": trigger_topics,
+        },
+        "branches": branch_answers,
+        "attachments": attachments,
+    }
+
+
+def _normalize_generated_persona(
+    generated: dict[str, Any],
+    questionnaire: dict[str, Any],
+    attachments: dict[str, Any],
+) -> dict[str, Any]:
+    """Normalize model output to required schema and enforce defaults."""
+    identity = questionnaire["identity"]
+    knowledge = questionnaire["knowledge"]
+    communication = questionnaire["communication"]
+    values = questionnaire["values"]
+
+    profile = generated.get("profile")
+    if not isinstance(profile, dict):
+        profile = {}
+
+    normalized = {
+        "name": str(generated.get("name") or identity["name"]),
+        "role": "Generated Persona",
+        "color": str(generated.get("color") or identity["color"] or "cyan"),
+        "active": bool(generated.get("active", True)),
+        "data": str(generated.get("data") or "").strip(),
+        "mbti_type": generated.get("mbti_type") or identity.get("mbti_type"),
+        "model": PROFILE_BUILDER_MODEL,
+        "profile": {
+            "traits": [str(x) for x in profile.get("traits", []) if str(x).strip()] or ["adaptable", "evidence-aware"],
+            "reasoning_style": str(profile.get("reasoning_style") or questionnaire["cognition"]["decision_style"]),
+            "communication_tone": str(profile.get("communication_tone") or communication["tone"]),
+            "knowledge_domains": [str(x) for x in profile.get("knowledge_domains", []) if str(x).strip()] or list(knowledge["deep_topics"]),
+            "values": [str(x) for x in profile.get("values", []) if str(x).strip()] or list(values["core_values"]),
+            "debate_behaviors": [str(x) for x in profile.get("debate_behaviors", []) if str(x).strip()] or [
+                f"Optimizes for {knowledge['goals'][:120]}",
+                f"Uses persuasion style: {communication['persuasion_style']}",
+            ],
+            "blind_spots": [str(x) for x in profile.get("blind_spots", []) if str(x).strip()] or list(knowledge["weak_topics"]),
+        },
+        "sources": {
+            "links": [item["url"] for item in attachments.get("links", []) if item.get("url")],
+            "files": [item["path"] for item in attachments.get("files", []) if item.get("path")],
+            "manual_excerpts": [item.get("source", "") for item in attachments.get("manual_excerpts", [])],
+        },
+        "questionnaire": questionnaire,
+        "attachment_summary": attachments.get("summary", {}),
+    }
+
+    if not normalized["data"]:
+        normalized["data"] = textwrap.dedent(
+            f"""
+            Identity: {normalized['name']} ({identity['primary_domain']}).
+            Decision style: {questionnaire['cognition']['decision_style']}. Risk tolerance: {questionnaire['cognition']['risk_tolerance']}.
+            Communication: {questionnaire['communication']['tone']} with persuasion style {questionnaire['communication']['persuasion_style']}.
+            Core values: {', '.join(values['core_values'])}.
+            Deep expertise: {', '.join(knowledge['deep_topics'])}.
+            Debate objective: {knowledge['goals']}.
+            """
+        ).strip()
+    return normalized
+
+
+async def run_persona_questionnaire(output_path: Path) -> None:
+    """Interactive full questionnaire that builds a comprehensive generated persona JSON entry."""
+    console.print()
+    console.print(
+        Panel(
+            "[bold]Generated Persona Questionnaire[/]\n"
+            "[dim]This wizard runs a full branched interview, ingests attachments, "
+            "and builds a comprehensive persona profile using "
+            f"{PROFILE_BUILDER_MODEL} and saves it into your people JSON file.[/]",
+            border_style="blue",
+        )
+    )
+
+    questionnaire_payload = _build_full_questionnaire()
+    identity = questionnaire_payload["identity"]
+    attachments = questionnaire_payload["attachments"]
+
+    model_prompt = textwrap.dedent(
+        """
+        You are building a comprehensive generated persona profile for a council debate system.
+        Return ONE JSON object only (no markdown) with this schema:
+        {
+          "name": string,
+          "role": "Generated Persona",
+          "color": string,
+          "active": boolean,
+          "data": string,
+          "mbti_type": string|null,
+          "model": string,
+          "profile": {
+            "traits": [string],
+            "reasoning_style": string,
+            "communication_tone": string,
+            "knowledge_domains": [string],
+            "values": [string],
+            "debate_behaviors": [string],
+            "blind_spots": [string]
+          },
+          "sources": {
+            "links": [string],
+                        "files": [string],
+                        "manual_excerpts": [string]
+                    },
+                    "questionnaire": object,
+                    "attachment_summary": object
+        }
+
+        Rules:
+        - "active" must be true by default.
+        - "model" must be exactly "x-ai/grok-4-1-fast-non-reasoning".
+        - "data" must be a rich, concrete textual profile (8-14 paragraphs) synthesizing identity,
+          thinking style, expertise, communication, values, and notable evidence from attachments.
+                - Infer likely blind spots and debate failure modes from the questionnaire, not stereotypes.
+                - Keep tone and vocabulary aligned with the user's stated communication style.
+        - Keep all claims grounded in the provided questionnaire and attachments.
+        - If MBTI not provided, set "mbti_type" to null.
+        """
+    ).strip()
+
+    input_msgs = [
+        {"role": "system", "content": model_prompt},
+        {"role": "user", "content": json.dumps(questionnaire_payload, ensure_ascii=True, indent=2)},
+    ]
+    raw = await api_call(input_msgs, max_tokens=2400, model=PROFILE_BUILDER_MODEL)
+    try:
+        generated_raw = _extract_json_object(raw)
+    except (ValueError, json.JSONDecodeError) as exc:
+        console.print(
+            Panel(
+                f"[bold red]Model output could not be parsed as persona JSON:[/]\n{exc}\n\n"
+                "[dim]You can re-run the questionnaire and try again.[/]",
+                title="Persona Build Error",
+                border_style="red",
+            )
+        )
+        return
+
+    generated = _normalize_generated_persona(
+        generated_raw,
+        questionnaire_payload,
+        attachments,
+    )
+
+    people = load_generated_people(output_path)
+    existing_index = next(
+        (idx for idx, person in enumerate(people) if str(person.get("name", "")).lower() == generated["name"].lower()),
+        None,
+    )
+    if existing_index is not None:
+        people[existing_index] = generated
+    else:
+        people.append(generated)
+    save_generated_people(output_path, people)
+
+    console.print()
+    console.print(
+        Panel(
+            f"[bold green]Persona saved.[/]\n"
+            f"Name: {generated['name']}\n"
+            f"Active: {generated['active']}\n"
+            f"Attachments: files={attachments['summary']['file_count']}, "
+            f"links={attachments['summary']['link_count']}, "
+            f"manual={attachments['summary']['manual_excerpt_count']}\n"
+            f"File: {output_path}\n"
+            f"Model: {PROFILE_BUILDER_MODEL}",
+            border_style="green",
+            title="Generated Persona",
+        )
+    )
+
+
+def set_persona_active(path: Path, name: str, active: bool) -> bool:
+    """Toggle active state for a generated persona by name.
+
+    Returns True if a persona was updated, else False.
+    """
+    people = load_generated_people(path)
+    for person in people:
+        person_name = str(person.get("name", ""))
+        if person_name.lower() == name.lower():
+            person["active"] = active
+            save_generated_people(path, people)
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -916,7 +1645,7 @@ async def run_council(
 
     # ── PERSONALITY MODE (Feature 1) ──────────────────────────────────────
     if personality_mode is None:
-        agents = base_agents
+        agents = _resolve_default_agents(base_agents, generated_data, topic=question)
     elif personality_mode == PersonalityMode.DYNAMIC:
         console.print("\n[dim]Generating dynamic agent personas for this topic…[/]\n")
         agents = await _generate_dynamic_agents(question, n=5, model=default_model)
@@ -1139,11 +1868,30 @@ async def run_council(
 # CLI
 # ---------------------------------------------------------------------------
 
-def list_agents(config_path: Path, personality_mode: PersonalityMode | None = None) -> None:
-    if personality_mode == PersonalityMode.CANNED:
+def list_agents(
+    config_path: Path,
+    personality_mode: PersonalityMode | None = None,
+    generated_data: list[dict] | None = None,
+) -> None:
+    base_agents, _ = load_config(config_path)
+
+    if personality_mode is None:
+        agents = _resolve_default_agents(base_agents, generated_data)
+    elif personality_mode == PersonalityMode.CANNED:
         agents = _dicts_to_agents(get_canned_personalities())
+    elif personality_mode == PersonalityMode.GENERATED:
+        agent_dicts = build_agent_panel(
+            PersonalityMode.GENERATED,
+            base_agents=[],
+            generated_data=generated_data,
+        )
+        agents = _dicts_to_agents(agent_dicts)
     else:
-        agents, _ = load_config(config_path)
+        agent_dicts = build_agent_panel(
+            personality_mode,
+            base_agents=[a.__dict__ for a in base_agents],
+        )
+        agents = _dicts_to_agents(agent_dicts)
     console.print()
     console.print(Panel("[bold]Configured Agents[/]", border_style="blue"))
     for a in agents:
@@ -1204,6 +1952,7 @@ async def run_dm_session(
     config_path: Path,
     personality_mode: PersonalityMode | None = None,
     guardrails_enabled: bool = True,
+    generated_data: list[dict] | None = None,
 ) -> None:
     """
     Run a private 1-on-1 DM session between the user and a single named agent.
@@ -1218,13 +1967,20 @@ async def run_dm_session(
 
     # Build agent pool according to personality mode
     if personality_mode is not None:
-        agent_dicts = build_agent_panel(
-            personality_mode,
-            base_agents=[a.__dict__ for a in base_agents],
-        )
+        if personality_mode == PersonalityMode.GENERATED:
+            agent_dicts = build_agent_panel(
+                personality_mode,
+                base_agents=[],
+                generated_data=generated_data,
+            )
+        else:
+            agent_dicts = build_agent_panel(
+                personality_mode,
+                base_agents=[a.__dict__ for a in base_agents],
+            )
         all_agents = _dicts_to_agents(agent_dicts)
     else:
-        all_agents = base_agents
+        all_agents = _resolve_default_agents(base_agents, generated_data)
 
     # Find the primary agent by name (case-insensitive, partial match)
     primary: Agent | None = None
@@ -1352,6 +2108,7 @@ def interactive_mode(
     config_path: Path,
     personality_mode: PersonalityMode | None = None,
     guardrails_enabled: bool = True,
+    generated_data: list[dict] | None = None,
 ) -> None:
     console.print()
     mode_label = f"  Mode: [bold]{personality_mode.value}[/]" if personality_mode else ""
@@ -1383,6 +2140,7 @@ def interactive_mode(
                 config_path,
                 personality_mode=personality_mode,
                 guardrails_enabled=guardrails_enabled,
+                generated_data=generated_data,
             )
         )
 
@@ -1401,6 +2159,8 @@ def main() -> None:
               python council.py --mode dynamic "What is the future of AI regulation?"
               python council.py --mode hybrid "Should we go open-source?"
               python council.py --mode generated --people people.json "What should we build?"
+                            python council.py --build-persona
+                            python council.py --set-active "Kavin" false
               python council.py --dm "The Skeptic" --mode canned
               python council.py --list-agents
               python council.py --no-guardrails "My question"
@@ -1435,8 +2195,23 @@ def main() -> None:
         help=(
             "Path to a JSON file for --mode generated. The file must contain a list "
             'of objects with at minimum {"name": "...", "data": "..."} keys. '
-            "data should be publicly available text describing the person."
+            "data should be publicly available text describing the person. "
+            f"Default when omitted: {DEFAULT_GENERATED_PEOPLE_FILE}"
         ),
+    )
+    parser.add_argument(
+        "--build-persona",
+        action="store_true",
+        help=(
+            "Launch interactive branched questionnaire, synthesize a comprehensive "
+            f"profile with {PROFILE_BUILDER_MODEL}, and save/update a generated persona JSON entry."
+        ),
+    )
+    parser.add_argument(
+        "--set-active",
+        nargs=2,
+        metavar=("NAME", "STATE"),
+        help="Set generated persona active state by name. STATE must be true or false.",
     )
     parser.add_argument(
         "--dm",
@@ -1466,25 +2241,92 @@ def main() -> None:
     if args.mode:
         pmode = PersonalityMode(args.mode)
 
-    # Load generated_data from --people JSON file if provided
-    generated_data: list[dict] | None = None
-    if args.people:
-        import json
-        try:
-            with open(args.people) as f:
-                generated_data = json.load(f)
-        except (OSError, json.JSONDecodeError) as exc:
+    people_path = _resolve_people_path(args.people)
+
+    if args.build_persona:
+        asyncio.run(run_persona_questionnaire(people_path))
+        return
+
+    if args.set_active:
+        name, state_raw = args.set_active
+        state = state_raw.strip().lower()
+        if state not in {"true", "false"}:
             console.print(
                 Panel(
-                    f"[bold red]Could not load --people file '{args.people}':[/]\n{exc}",
-                    title="File Error",
+                    "[bold red]Invalid STATE for --set-active.[/] Use true or false.",
+                    title="Argument Error",
                     border_style="red",
                 )
             )
             sys.exit(1)
+        try:
+            updated = set_persona_active(people_path, name, active=(state == "true"))
+        except ValueError as exc:
+            console.print(Panel(f"[bold red]{exc}[/]", title="File Error", border_style="red"))
+            sys.exit(1)
+        if not updated:
+            console.print(
+                Panel(
+                    f"[bold yellow]No persona named '{name}' found in {people_path}.[/]",
+                    title="No Match",
+                    border_style="yellow",
+                )
+            )
+            sys.exit(1)
+        console.print(
+            Panel(
+                f"[bold green]Updated active state.[/]\nName: {name}\nActive: {state}\nFile: {people_path}",
+                title="Persona Updated",
+                border_style="green",
+            )
+        )
+        return
+
+    # Load generated_data for generated mode and generated-mode list/DM paths.
+    generated_data: list[dict] | None = None
+    should_load_people = (
+        bool(args.people)
+        or pmode == PersonalityMode.GENERATED
+        or pmode is None
+    )
+    if should_load_people:
+        try:
+            generated_data = load_generated_people(people_path)
+        except ValueError as exc:
+            if pmode is None and not args.people:
+                console.print(
+                    Panel(
+                        f"[bold yellow]Could not load default generated personas.[/]\n{exc}\n\n"
+                        "Continuing without generated personas.",
+                        title="Generated Personas Warning",
+                        border_style="yellow",
+                    )
+                )
+                generated_data = None
+            else:
+                console.print(
+                    Panel(
+                        f"[bold red]{exc}[/]",
+                        title="File Error",
+                        border_style="red",
+                    )
+                )
+                sys.exit(1)
+
+    if pmode == PersonalityMode.GENERATED and not generated_data:
+        console.print(
+            Panel(
+                "[bold yellow]Generated mode has no personas loaded.[/]\n"
+                f"Expected file: {people_path}\n"
+                "Run --build-persona to create one.",
+                title="Generated Personas Missing",
+                border_style="yellow",
+            )
+        )
+        sys.exit(1)
 
     if args.list_agents:
-        list_agents(args.config, pmode)
+        list_agents(args.config, pmode, generated_data=generated_data)
         return
 
     # DM Mode (Feature 4)
@@ -1495,6 +2337,7 @@ def main() -> None:
                 args.config,
                 personality_mode=pmode,
                 guardrails_enabled=args.guardrails,
+                generated_data=generated_data,
             )
         )
         return
@@ -1510,7 +2353,12 @@ def main() -> None:
             )
         )
     else:
-        interactive_mode(args.config, personality_mode=pmode, guardrails_enabled=args.guardrails)
+        interactive_mode(
+            args.config,
+            personality_mode=pmode,
+            guardrails_enabled=args.guardrails,
+            generated_data=generated_data,
+        )
 
 
 if __name__ == "__main__":
