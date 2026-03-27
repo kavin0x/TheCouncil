@@ -642,6 +642,9 @@ def build_agent_panel(
             return get_canned_personalities()
         agents = []
         for person in generated_data:
+            is_active = person.get("active", True)
+            if isinstance(is_active, bool) and not is_active:
+                continue
             name = person.get("name", "Unknown")
             data = person.get("data", "")
             color = person.get("color", "cyan")
@@ -653,6 +656,7 @@ def build_agent_panel(
                 "system_prompt": system_prompt,
                 "color": color,
                 "model": model,
+                "active": bool(is_active),
                 "job_role": None,
             })
         return agents

@@ -16,6 +16,7 @@ from personalities import (
     parse_dynamic_agents,
     _build_generated_system_prompt,
 )
+from council import Agent, _resolve_default_agents
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +260,31 @@ class TestBuildAgentPanel:
         assert "Zara Helios" in names
         assert "Magnus Evergreen" in names
 
+    def test_generated_mode_skips_inactive_personas(self):
+        """GENERATED mode excludes personas where active is false."""
+        data = [
+            {
+                "name": "Active Persona",
+                "data": "Active profile data.",
+                "active": True,
+            },
+            {
+                "name": "Inactive Persona",
+                "data": "Inactive profile data.",
+                "active": False,
+            },
+        ]
+        panel = build_agent_panel(PersonalityMode.GENERATED, [], generated_data=data)
+        names = [p["name"] for p in panel]
+        assert names == ["Active Persona"]
+
+    def test_generated_mode_defaults_active_true(self):
+        """Missing active field defaults to included/active persona."""
+        data = [{"name": "Default Active", "data": "Profile data."}]
+        panel = build_agent_panel(PersonalityMode.GENERATED, [], generated_data=data)
+        assert len(panel) == 1
+        assert panel[0]["active"] is True
+
     def test_generated_mode_system_prompt_contains_name(self):
         """GENERATED personas have their name in their system prompt."""
         data = [
@@ -270,6 +296,51 @@ class TestBuildAgentPanel:
         ]
         panel = build_agent_panel(PersonalityMode.GENERATED, [], generated_data=data)
         assert "Lyra Quill" in panel[0]["system_prompt"]
+
+    def test_default_mode_appends_active_generated_personas(self):
+        """Default council should include base agents followed by active generated personas."""
+        base_agents = [
+            Agent(name="Base One", role="Base", system_prompt="A", color="blue"),
+            Agent(name="Base Two", role="Base", system_prompt="B", color="green"),
+        ]
+        generated_data = [
+            {"name": "Generated One", "data": "Profile A", "active": True},
+            {"name": "Generated Two", "data": "Profile B", "active": True},
+        ]
+
+        merged = _resolve_default_agents(base_agents, generated_data)
+        assert [a.name for a in merged] == [
+            "Base One",
+            "Base Two",
+            "Generated One",
+            "Generated Two",
+        ]
+
+    def test_default_mode_excludes_inactive_generated_personas(self):
+        """Inactive generated personas should not be appended in default mode."""
+        base_agents = [
+            Agent(name="Base", role="Base", system_prompt="A", color="blue"),
+        ]
+        generated_data = [
+            {"name": "Generated Active", "data": "Profile A", "active": True},
+            {"name": "Generated Inactive", "data": "Profile B", "active": False},
+        ]
+
+        merged = _resolve_default_agents(base_agents, generated_data)
+        assert [a.name for a in merged] == ["Base", "Generated Active"]
+
+    def test_default_mode_name_collision_prefers_base_agent(self):
+        """When names collide, default merge keeps the base/YAML agent and skips generated duplicate."""
+        base_agents = [
+            Agent(name="Kavin Shah", role="Base", system_prompt="A", color="blue"),
+        ]
+        generated_data = [
+            {"name": "kavin shah", "data": "Generated profile", "active": True},
+            {"name": "Another Persona", "data": "Generated profile", "active": True},
+        ]
+
+        merged = _resolve_default_agents(base_agents, generated_data)
+        assert [a.name for a in merged] == ["Kavin Shah", "Another Persona"]
 
     def test_mode_isolation(self):
         """Different modes return distinct agent sets."""
