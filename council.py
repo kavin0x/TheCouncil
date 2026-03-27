@@ -35,7 +35,9 @@ import os
 import sys
 import textwrap
 import time
+from typing import Any, cast
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -70,6 +72,7 @@ DEFAULT_CONFIG = Path(__file__).parent / "agents.yaml"
 XAI_MODEL_MAP = {
     "x-ai/grok-4.20-multi-agent-beta": "grok-4.20-multi-agent-beta-0309",
     "x-ai/grok-4.20-multi-agent-beta-0309": "grok-4.20-multi-agent-beta-0309",
+    "x-ai/grok-4.20-0309-non-reasoning": "grok-4.20-0309-non-reasoning",
     "x-ai/grok-4": "grok-4-0709",
     "x-ai/grok-4-0709": "grok-4-0709",
     "x-ai/grok-4-1-fast-reasoning": "grok-4-1-fast-reasoning",
@@ -338,7 +341,7 @@ def deliver_dm(dm: DM, session: DebateSession) -> None:
 # ---------------------------------------------------------------------------
 
 async def api_call(
-    input_msgs: list[dict],
+    input_msgs: Sequence[dict],
     max_tokens: int = 1024,
     model: str | None = None,
 ) -> str:
@@ -346,14 +349,14 @@ async def api_call(
     client, resolved_model = get_client_for_model(model or MODEL)
     response = await client.responses.create(
         model=resolved_model,
-        input=input_msgs,
+        input=cast(Any, list(input_msgs)),
         max_output_tokens=max_tokens,
     )
     return response.output_text or ""
 
 
 async def api_stream(
-    input_msgs: list[dict],
+    input_msgs: Sequence[dict],
     max_tokens: int = 1024,
     model: str | None = None,
 ) -> str:
@@ -362,7 +365,7 @@ async def api_stream(
     collected: list[str] = []
     async with client.responses.stream(
         model=resolved_model,
-        input=input_msgs,
+        input=cast(Any, list(input_msgs)),
         max_output_tokens=max_tokens,
     ) as stream:
         async for event in stream:
