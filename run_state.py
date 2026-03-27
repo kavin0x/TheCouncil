@@ -125,7 +125,7 @@ class InvalidTransitionError(RuntimeError):
 
 
 class RunStore:
-    """Thread-safe in-memory store for Run objects."""
+    """Coroutine-safe in-memory store for Run objects (single event-loop / single-process)."""
 
     def __init__(self) -> None:
         self._runs: dict[str, Run] = {}
