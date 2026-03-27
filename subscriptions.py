@@ -3,9 +3,9 @@ Subscription tiers and Stripe integration helpers for TheCouncil.
 
 Tier structure (monthly billing):
   Starter    $10  — casual use, basic council runs
-  Pro        $50  — heavier use, export, history
-  Business  $100  — API access, priority processing
-  Enterprise $200 — MCP/plugin integrations, maximum usage (budget-safe ceiling)
+  Pro        $50  — heavier use, export, history, API token access
+  Business  $100  — MCP/plugin integrations, priority processing
+  Enterprise $200 — maximum usage (budget-safe ceiling), full feature access
 
 Feature gating:
   - MCP and plugin/tooling integrations require Business or Enterprise.

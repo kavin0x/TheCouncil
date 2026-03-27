@@ -19,6 +19,7 @@ Usage (dev):
 from __future__ import annotations
 
 import os
+import secrets
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
@@ -88,7 +89,7 @@ async def require_auth(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(exc),
         ) from exc
-    if token != expected:
+    if not secrets.compare_digest(token, expected):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid API token.",
@@ -117,13 +118,16 @@ class RunResponse(BaseModel):
     created_at: float
     started_at: float | None = None
     finished_at: float | None = None
-    owner_id: str
     result: dict[str, Any] | None = None
     error: str | None = None
 
     @classmethod
     def from_run(cls, run: Run) -> "RunResponse":
-        return cls(**run.to_dict())
+        data = run.to_dict()
+        # owner_id is an internal principal identifier; exclude it from responses
+        # to avoid echoing the bearer token (used as owner_id in dev mode) back to clients.
+        data.pop("owner_id", None)
+        return cls(**data)
 
 
 # ---------------------------------------------------------------------------

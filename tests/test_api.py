@@ -10,8 +10,8 @@ import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
 
 
-# The API module uses module-level singletons; patch env before import.
-os.environ.setdefault("API_SECRET_KEY", "test-secret-key")
+# Force the API key so tests are hermetic regardless of the calling environment.
+os.environ["API_SECRET_KEY"] = "test-secret-key"
 
 from api import app  # noqa: E402  (import after env setup)
 
@@ -100,6 +100,13 @@ class TestCreateRun:
         assert resp.status_code == 202
         data = resp.json()
         assert data["status"] == "pending"
+
+    @pytest.mark.asyncio
+    async def test_create_run_does_not_expose_owner_id(self, client):
+        """owner_id must not appear in the API response (it carries the bearer token in dev mode)."""
+        resp = await client.post("/runs", json={"question": "Secret check?"}, headers=AUTH)
+        assert resp.status_code == 202
+        assert "owner_id" not in resp.json()
 
     @pytest.mark.asyncio
     async def test_create_run_question_too_long_rejected(self, client):
