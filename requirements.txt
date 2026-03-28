@@ -10,5 +10,5 @@ stripe>=10.0.0
 pytest>=7.0.0
 pytest-asyncio>=0.23.0
 mcp>=1.26.0
+fastmcp>=0.2.0
 e2b>=2.19.0
-mcp>=1.26.0

@@ -50,8 +50,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
-from guardrails import Guardrails
-from personalities import (
+from council.features.guardrails import Guardrails
+from council.features.personalities import (
     JobRole,
     JOB_ROLE_INSTRUCTIONS,
     PersonalityMode,

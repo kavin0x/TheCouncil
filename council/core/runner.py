@@ -8,12 +8,12 @@ from typing import Any
 
 from rich.console import Console
 
-import council
-from guardrails import Guardrails
-from personalities import PersonalityMode
+from council.core import council
+from council.features.guardrails import Guardrails
+from council.features.personalities import PersonalityMode
 
 
-DEFAULT_CONFIG_PATH = Path(__file__).parent / "agents.yaml"
+DEFAULT_CONFIG_PATH = Path(__file__).parent.parent.parent / "agents.yaml"
 
 
 class CouncilRunBlockedError(RuntimeError):

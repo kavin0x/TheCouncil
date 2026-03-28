@@ -5,7 +5,7 @@ Unit tests for run_state.py — Run state machine, RunStore, and RunQueue.
 import asyncio
 import pytest
 
-from run_state import (
+from council.models.state import (
     Run,
     RunStatus,
     RunStore,

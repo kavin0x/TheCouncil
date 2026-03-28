@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": "./.github/hooks/run-socket-scan-if-deps-changed.sh",
+        "timeout": 120
+      }
+    ]
+  }
+}

@@ -5,7 +5,7 @@ Unit tests for guardrail input screening.
 import asyncio
 import pytest
 
-from guardrails import (
+from council.features.guardrails import (
     ViolationType,
     GuardrailViolation,
     GuardrailResult,
