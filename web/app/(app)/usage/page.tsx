@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Check, ExternalLink } from "lucide-react";
 import { api, type Billing, type Entitlements, type Usage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import Link from "next/link";
 import {
   Badge,
   Button,
@@ -74,9 +75,23 @@ export default function UsagePage() {
     onSuccess: ({ url }) => window.location.assign(url),
   });
 
+  const sandboxRun = useMutation({
+    mutationFn: () =>
+      api.createRun(token!, {
+        question: "Sandbox demo: verify environment and return a readiness message.",
+        config: {
+          run_kind: "sandbox",
+          sandbox_cmd: "python -c \"print('TheCouncil sandbox ready')\"",
+          sandbox_timeout_s: 60,
+        },
+      }),
+  });
+
   const runsUsed = usage.data?.runs.used ?? 0;
   const runsLimit = usage.data?.runs.limit ?? 1;
   const pct = Math.min(100, Math.round((runsUsed / runsLimit) * 100));
+
+  const computerUseEnabled = !!ent.data?.features.computer_use_enabled;
 
   return (
     <div className="space-y-8">
@@ -138,6 +153,44 @@ export default function UsagePage() {
             </CardContent>
           </Card>
         </div>
+      </section>
+
+      {/* Ultra sandbox demo */}
+      <section className="space-y-4">
+        <h2 className="text-base font-semibold text-zinc-200">Computer-use sandbox</h2>
+        <Card>
+          <CardHeader>
+            <CardTitle>Ultra sandbox demo</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-zinc-400">
+              Launch an isolated sandbox run (Ultra/Enterprise only). This is the foundation for CUA-style
+              computer-use workflows.
+            </p>
+            {computerUseEnabled ? (
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button
+                  onClick={() => sandboxRun.mutate()}
+                  disabled={sandboxRun.isPending}
+                >
+                  {sandboxRun.isPending ? "Starting…" : "Run sandbox demo"}
+                </Button>
+                {sandboxRun.data?.run_id && (
+                  <Link
+                    href={`/runs/${sandboxRun.data.run_id}`}
+                    className="text-sm text-violet-400 hover:underline"
+                  >
+                    View run
+                  </Link>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-zinc-500">
+                Upgrade to Ultra to enable sandboxed computer-use features.
+              </p>
+            )}
+          </CardContent>
+        </Card>
       </section>
 
       {/* Billing section */}
