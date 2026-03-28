@@ -1468,10 +1468,14 @@ def _print_dm_indicator(dm: DM) -> None:
 # Resolution + vote
 # ---------------------------------------------------------------------------
 
-_PROPOSE_RESOLUTION_PROMPT = """\
-Based on the debate, propose your own resolution for the council to vote on.
-It must be one clear, actionable sentence (e.g. "The council recommends..." or "The council finds that...").
-Reply with ONLY the resolution text. No preamble, no explanation."""
+_PROPOSE_RESOLUTION_PROMPT = (
+    "Based on the debate, propose your own resolution for the council to vote on.\n\n"
+    "Write 1–2 substantive paragraphs that express your genuine position. Your resolution must "
+    "reflect your persona, MBTI profile, and job role. Use real reasoning and take a clear stand — "
+    "no bullet lists, no one-liners, no vague hedging. Write as yourself: your voice, your logic, "
+    "your conclusion.\n\n"
+    "Begin directly with your resolution text. No preamble, no labels."
+)
 
 
 _VOTE_FOR_ONE_RESOLUTION_PROMPT = """\
@@ -1551,7 +1555,7 @@ async def _agent_propose_resolution(
         {"role": "user", "content": user_content},
     ]
     model = agent.model or session.model
-    return (await api_call(input_msgs, max_tokens=200, model=model)).strip()
+    return (await api_call(input_msgs, max_tokens=600, model=model)).strip()
 
 
 def _build_resolutions_block(resolutions_in_play: list[tuple[str, str]]) -> str:
@@ -1583,6 +1587,205 @@ async def _agent_vote_for_one_resolution(
     model = voter.model or session.model
     raw = await api_call(input_msgs, max_tokens=120, model=model)
     return _parse_single_preference_vote(raw, valid_proposers)
+
+
+# ---------------------------------------------------------------------------
+# Top-3 extraction + Moderator analysis
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ResolutionAnalysis:
+    """Structured pros/cons analysis for a single resolution."""
+
+    rank: int
+    agent_name: str
+    agent_role: str
+    resolution: str
+    summary: str          # one-sentence distillation
+    pros: list[str]       # 2–3 specific pros
+    cons: list[str]       # 2–3 specific cons
+
+
+@dataclass
+class ModeratorReport:
+    """Output of the Moderator agent: ranked analyses for the top 3 resolutions."""
+
+    analyses: list[ResolutionAnalysis]
+
+
+def _get_top3_resolutions(session: DebateSession) -> list[tuple[str, str, int]]:
+    """Return the top-3 (agent_name, resolution_text, vote_count) by first-round votes.
+
+    Tie at 3rd place is broken by insertion order in session.resolutions.
+    Returns up to 3 entries; may be fewer if fewer resolutions exist.
+    """
+    if not session.vote_rounds:
+        # No votes at all — return resolutions in insertion order with 0 votes
+        ordered = list(session.resolutions.items())
+        return [(name, text, 0) for name, text in ordered[:3]]
+
+    # Use the first vote round (all resolutions in play, most complete tally)
+    first_round_votes = session.vote_rounds[0]
+    counts = _compute_vote_counts(first_round_votes)
+
+    # Build (name, text, votes) preserving insertion order as secondary sort key
+    insertion_order = {name: i for i, name in enumerate(session.resolutions)}
+    ranked = sorted(
+        ((name, text, counts.get(name, 0)) for name, text in session.resolutions.items()),
+        key=lambda x: (-x[2], insertion_order.get(x[0], 0)),
+    )
+    return ranked[:3]
+
+
+_MODERATOR_SYSTEM_PROMPT = (
+    "You are a neutral Moderator. You have no persona, no vote, and no stake in the outcome. "
+    "Your sole purpose is to provide an objective, rigorous analysis of the resolutions "
+    "placed before you. You do not favour any agent. You evaluate purely on merit."
+)
+
+_MODERATOR_ANALYSIS_PROMPT = """\
+You are analysing the top resolutions from a council debate.
+
+ORIGINAL QUESTION:
+---
+{question}
+---
+
+TOP RESOLUTIONS (ranked by votes, highest first):
+
+{resolutions_block}
+
+For EACH resolution above, produce a structured analysis with:
+  - summary: one sentence that captures the core idea (not generic praise)
+  - pros: exactly 2–3 specific strengths directly tied to the question
+  - cons: exactly 2–3 specific weaknesses or risks directly tied to the question
+
+Respond with a valid JSON object in EXACTLY this structure (no extra keys, no markdown fences):
+
+{{
+  "analyses": [
+    {{
+      "rank": 1,
+      "summary": "...",
+      "pros": ["...", "...", "..."],
+      "cons": ["...", "...", "..."]
+    }},
+    {{
+      "rank": 2,
+      "summary": "...",
+      "pros": ["...", "...", "..."],
+      "cons": ["...", "...", "..."]
+    }},
+    {{
+      "rank": 3,
+      "summary": "...",
+      "pros": ["...", "...", "..."],
+      "cons": ["...", "...", "..."]
+    }}
+  ]
+}}
+
+Do not include any text outside the JSON object."""
+
+
+def _parse_moderator_json(
+    raw: str,
+    top3: list[tuple[str, str, int]],
+    agents: list[Agent],
+) -> ModeratorReport:
+    """Parse the moderator's JSON response into a ModeratorReport.
+
+    Falls back to placeholder entries if parsing fails.
+    """
+    agent_by_name: dict[str, Agent] = {a.name: a for a in agents}
+
+    def _make_fallback(rank: int, name: str, text: str) -> ResolutionAnalysis:
+        agent = agent_by_name.get(name)
+        return ResolutionAnalysis(
+            rank=rank,
+            agent_name=name,
+            agent_role=agent.role if agent else "",
+            resolution=text,
+            summary="(summary unavailable)",
+            pros=["(unavailable)"],
+            cons=["(unavailable)"],
+        )
+
+    try:
+        # Strip markdown fences if the model wrapped the JSON anyway
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```[a-z]*\n?", "", cleaned)
+            cleaned = re.sub(r"\n?```$", "", cleaned.strip())
+        data = json.loads(cleaned)
+        raw_analyses = data.get("analyses", [])
+    except (json.JSONDecodeError, AttributeError):
+        return ModeratorReport(
+            analyses=[_make_fallback(i + 1, name, text) for i, (name, text, _) in enumerate(top3)]
+        )
+
+    analyses: list[ResolutionAnalysis] = []
+    for i, (agent_name, resolution_text, _) in enumerate(top3):
+        rank = i + 1
+        agent = agent_by_name.get(agent_name)
+        # Find matching entry by rank; fall back to positional
+        entry: dict = {}
+        for a in raw_analyses:
+            if isinstance(a, dict) and a.get("rank") == rank:
+                entry = a
+                break
+        if not entry and i < len(raw_analyses) and isinstance(raw_analyses[i], dict):
+            entry = raw_analyses[i]
+        analyses.append(
+            ResolutionAnalysis(
+                rank=rank,
+                agent_name=agent_name,
+                agent_role=agent.role if agent else "",
+                resolution=resolution_text,
+                summary=str(entry.get("summary", "(summary unavailable)")),
+                pros=[str(p) for p in entry.get("pros", ["(unavailable)"])],
+                cons=[str(c) for c in entry.get("cons", ["(unavailable)"])],
+            )
+        )
+
+    # Pad with fallbacks if the model returned fewer than expected
+    for i in range(len(analyses), len(top3)):
+        agent_name, resolution_text, _ = top3[i]
+        analyses.append(_make_fallback(i + 1, agent_name, resolution_text))
+
+    return ModeratorReport(analyses=analyses)
+
+
+async def _moderator_pros_cons(
+    question: str,
+    top3: list[tuple[str, str, int]],
+    agents: list[Agent],
+    model: str,
+) -> ModeratorReport:
+    """Run the Moderator agent over the top-3 resolutions and return structured analysis."""
+    resolutions_block = "\n\n".join(
+        f"RANK {rank} — Proposed by {name} ({_agent_role_str(name, agents)}):\n---\n{text}\n---"
+        for rank, (name, text, _) in enumerate(top3, start=1)
+    )
+    user_content = _MODERATOR_ANALYSIS_PROMPT.format(
+        question=question,
+        resolutions_block=resolutions_block,
+    )
+    input_msgs = [
+        {"role": "system", "content": _MODERATOR_SYSTEM_PROMPT},
+        {"role": "user", "content": user_content},
+    ]
+    raw = await api_call(input_msgs, max_tokens=1200, model=model)
+    return _parse_moderator_json(raw, top3, agents)
+
+
+def _agent_role_str(agent_name: str, agents: list[Agent]) -> str:
+    """Return the role string for an agent by name, or empty string if not found."""
+    for a in agents:
+        if a.name == agent_name:
+            return a.role
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -1771,7 +1974,6 @@ async def run_council(
     MAX_TIEBREAKER_ROUNDS = 5
     active_resolutions = list(session.resolutions.keys())
     tiebreaker_round = 5
-    final_winner: str | None = None
 
     while True:
         console.rule(
@@ -1810,7 +2012,6 @@ async def run_council(
         console.print()
 
         if len(winners) == 1:
-            final_winner = winners[0]
             break
 
         # No valid votes: keep current set and run tie-breaker
@@ -1822,7 +2023,6 @@ async def run_council(
             console.print(
                 "[dim]Max tie-breaker rounds reached. Picking first tied resolution.[/]"
             )
-            final_winner = winners[0]
             break
 
         active_resolutions = winners
@@ -1843,21 +2043,81 @@ async def run_council(
         session.rounds.append(tiebreaker_responses)
         tiebreaker_round += 1
 
-    # ── FINAL RESOLUTION ────────────────────────────────────────────────────
+    # ── TOP ANSWER + MODERATOR COMPARISON ───────────────────────────────────
+    top3 = _get_top3_resolutions(session)
+
+    # Moderator analysis
+    console.print()
+    console.rule(
+        Text("  MODERATOR ANALYSIS  ", style="bold white on dark_green"),
+        style="green",
+    )
+    console.print("\n[dim]Moderator reviewing top resolutions…[/]\n")
+    report = await _moderator_pros_cons(
+        question=session.question,
+        top3=top3,
+        agents=agents,
+        model=session.model,
+    )
+
+    _render_top3_output(report, agents)
+    console.rule(Text("  SESSION COMPLETE  ", style="bold white on dark_blue"), style="blue")
+    console.print()
+
+
+def _render_top3_output(report: ModeratorReport, agents: list[Agent]) -> None:
+    """Render the Top Answer section and the 3-way comparison table."""
+    from rich.table import Table
+
+    if not report.analyses:
+        return
+
+    agent_by_name: dict[str, Agent] = {a.name: a for a in agents}
+
+    # ── TOP ANSWER ────────────────────────────────────────────────────────
     console.rule(Text("  COUNCIL CONSENSUS  ", style="bold white on dark_blue"), style="blue")
     console.print()
-    if final_winner:
-        final_resolution = session.resolutions[final_winner]
-        console.print(
-            Panel(
-                final_resolution,
-                title=f"[bold green]Final Resolution[/] (proposed by {final_winner})",
-                border_style="green",
-                padding=(1, 2),
-            )
+
+    top = report.analyses[0]
+    winner_agent = agent_by_name.get(top.agent_name)
+    winner_color = winner_agent.rich_color if winner_agent else "bold green"
+    console.print(
+        Panel(
+            top.resolution,
+            title=(
+                f"[bold green]#1 Resolution[/]  "
+                f"[{winner_color}]{top.agent_name}[/]  [dim]· {top.agent_role}[/]"
+            ),
+            border_style="green",
+            padding=(1, 2),
         )
-        console.print()
-    console.rule(Text("  SESSION COMPLETE  ", style="bold white on dark_blue"), style="blue")
+    )
+    console.print()
+
+    # ── COMPARISON TABLE ──────────────────────────────────────────────────
+    console.rule(Text("  TOP 3 COMPARISON  ", style="bold white on dark_magenta"), style="magenta")
+    console.print()
+
+    table = Table(show_header=True, header_style="bold magenta", expand=True, show_lines=True)
+    table.add_column("Rank", style="bold", justify="center", width=6)
+    table.add_column("Agent", style="bold cyan", min_width=14)
+    table.add_column("Summary", min_width=24)
+    table.add_column("Pros", style="green", min_width=28)
+    table.add_column("Cons", style="red", min_width=28)
+
+    for analysis in report.analyses:
+        rank_label = f"#{analysis.rank}"
+        pros_text = "\n".join(f"• {p}" for p in analysis.pros)
+        cons_text = "\n".join(f"• {c}" for c in analysis.cons)
+        table.add_row(
+            rank_label,
+            f"{analysis.agent_name}\n[dim]{analysis.agent_role}[/]",
+            analysis.summary,
+            pros_text,
+            cons_text,
+        )
+
+    console.print(table)
     console.print()
 
 
