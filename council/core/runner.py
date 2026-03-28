@@ -208,6 +208,15 @@ async def run_council_for_api(
 
         final_resolution = session.resolutions.get(final_winner or "", "") if final_winner else ""
 
+        # Top-3 resolutions + moderator analysis
+        top3 = council._get_top3_resolutions(session)
+        report = await council._moderator_pros_cons(
+            question=question,
+            top3=top3,
+            agents=agents,
+            model=session.model,
+        )
+
         # Build compact JSON result
         per_round = []
         for round_responses in session.rounds:
@@ -226,6 +235,19 @@ async def run_council_for_api(
 
         dms = [{"sender": dm.sender, "recipient": dm.recipient, "content": dm.content, "round_num": dm.round_num} for dm in session.dms]
 
+        top3_output = [
+            {
+                "rank": a.rank,
+                "agent": a.agent_name,
+                "role": a.agent_role,
+                "resolution": a.resolution,
+                "summary": a.summary,
+                "pros": a.pros,
+                "cons": a.cons,
+            }
+            for a in report.analyses
+        ]
+
         elapsed_ms = int((time.monotonic() - start) * 1000)
         return {
             "question": question,
@@ -237,6 +259,7 @@ async def run_council_for_api(
             "vote_rounds": session.vote_rounds,
             "winner": final_winner,
             "final_resolution": final_resolution,
+            "top3": top3_output,
             "meta": {
                 "num_rounds": num_rounds,
                 "elapsed_ms": elapsed_ms,
