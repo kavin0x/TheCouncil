@@ -27,6 +27,10 @@ cp .env.example .env        # add keys
 # HTTP API (dev)
 uvicorn api:app --reload
 
+# MCP server (remote) is mounted at:
+#   http://localhost:8000/mcp
+# and is tier-gated via DEFAULT_SUBSCRIPTION_TIER (demo only).
+
 # CLI (see council.py --help)
 python council.py --help
 ```
