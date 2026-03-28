@@ -235,3 +235,31 @@ class TestStripeWebhook:
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Entitlements and tier enforcement
+# ---------------------------------------------------------------------------
+
+
+class TestEntitlements:
+    @pytest.mark.asyncio
+    async def test_entitlements_endpoint_returns_tier_limits(self, client, monkeypatch):
+        monkeypatch.setenv("DEFAULT_SUBSCRIPTION_TIER", "pro")
+        resp = await client.get("/me/entitlements", headers=AUTH)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["tier"] == "pro"
+        assert body["limits"]["max_saved_personas"] == 10
+        assert body["features"]["mcp_enabled"] is True
+
+    @pytest.mark.asyncio
+    async def test_create_run_enforces_max_agents(self, client, monkeypatch):
+        monkeypatch.setenv("DEFAULT_SUBSCRIPTION_TIER", "basic")
+        resp = await client.post(
+            "/runs",
+            json={"question": "Q?", "config": {"num_agents": 999}},
+            headers=AUTH,
+        )
+        assert resp.status_code == 400
+        assert "exceeds tier limit" in resp.json()["detail"]

@@ -7,8 +7,8 @@ on:
     branches: ["**"]
 
 jobs:
-  test:
-    name: Test & Lint
+  python:
+    name: Python — Test & Lint
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -40,3 +40,42 @@ jobs:
         run: |
           pip install pip-audit
           pip-audit --requirement requirements.txt --skip-editable
+
+  web:
+    name: Web — Lint, Typecheck & Test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm run test
+        env:
+          NEXT_PUBLIC_API_BASE_URL: "http://localhost:8000"
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_API_BASE_URL: "http://localhost:8000"

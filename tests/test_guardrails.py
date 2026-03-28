@@ -4,7 +4,6 @@ Unit tests for guardrail input screening.
 
 import asyncio
 import pytest
-import pytest_asyncio
 
 from guardrails import (
     ViolationType,
