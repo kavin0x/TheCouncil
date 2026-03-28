@@ -4,7 +4,7 @@ import os
 
 import pytest # type: ignore
 
-from subscriptions import (
+from council.models.subscriptions import (
     TierName,
     TIERS,
     TIER_ORDER,

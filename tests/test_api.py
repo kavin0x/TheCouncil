@@ -13,7 +13,7 @@ from httpx import AsyncClient, ASGITransport
 # Force the API key so tests are hermetic regardless of the calling environment.
 os.environ["API_SECRET_KEY"] = "test-secret-key"
 
-from api import app  # noqa: E402  (import after env setup)
+from council.api import app  # noqa: E402  (import after env setup)
 
 
 # ---------------------------------------------------------------------------
@@ -150,11 +150,14 @@ class TestGetRun:
         """A run created by one token is not visible to another token."""
         monkeypatch.setenv("API_SECRET_KEY", "token-a")
         import importlib
-        import api as api_mod
-        importlib.reload(api_mod)
+        import sys
+        # Get the module and reload it with new env
+        if "council.api.app" in sys.modules:
+            importlib.reload(sys.modules["council.api.app"])
+        from council.api.app import app as api_app
 
         async with AsyncClient(
-            transport=ASGITransport(app=api_mod.app), base_url="http://testserver"
+            transport=ASGITransport(app=api_app), base_url="http://testserver"
         ) as c2:
             # create with token-a
             r1 = await c2.post(

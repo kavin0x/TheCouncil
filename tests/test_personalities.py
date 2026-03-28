@@ -4,7 +4,7 @@ Unit tests for personality mode switching, MBTI profile generation, and canned p
 
 import pytest
 
-from personalities import (
+from council.features.personalities import (
     PersonalityMode,
     JobRole,
     JOB_ROLE_INSTRUCTIONS,
@@ -15,7 +15,7 @@ from personalities import (
     parse_dynamic_agents,
     _build_generated_system_prompt,
 )
-from council import Agent, _resolve_default_agents
+from council.core.council import Agent, _resolve_default_agents
 
 
 # ---------------------------------------------------------------------------

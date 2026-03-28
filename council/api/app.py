@@ -23,7 +23,7 @@ Auth:
   for single-key dev mode, or against a user table in production.
 
 Usage (dev):
-  uvicorn api:app --reload
+  uvicorn council.api.app:app --reload
 """
 
 from __future__ import annotations
@@ -40,19 +40,19 @@ from typing import Annotated, Any
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status  # type: ignore
 from fastapi.middleware.cors import CORSMiddleware  # type: ignore
 from fastapi.responses import JSONResponse  # type: ignore
+from fastmcp import FastMCP
 from pydantic import BaseModel, Field
 
-from council_runner import CouncilRunBlockedError, run_council_for_api
-from mcp.server.fastmcp import FastMCP
-from run_state import (
+from council.core.runner import CouncilRunBlockedError, run_council_for_api
+from council.models.state import (
     Run,
     RunNotFoundError,
     RunStatus,
     run_queue,
     run_store,
 )
-from sandbox_runner import SandboxDisabledError, run_sandbox_task
-from subscriptions import (
+from council.features.sandbox import SandboxDisabledError, run_sandbox_task
+from council.models.subscriptions import (
     TierName,
     get_tier,
     is_within_run_limit,
@@ -77,7 +77,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.mount("/mcp", _mcp.streamable_http_app())
+if hasattr(_mcp, "http_app"):
+    _mcp_app = _mcp.http_app(path="/")
+else:
+    streamable_http_app = getattr(_mcp, "streamable_http_app")
+    _mcp_app = streamable_http_app()
+
+app.mount("/mcp", _mcp_app)
 
 _worker_task: asyncio.Task[None] | None = None
 

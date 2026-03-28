@@ -5,6 +5,10 @@ description = "Multi-agent council debates (FastAPI + CLI) with optional Next.js
 readme = "README.md"
 requires-python = ">=3.12"
 
+[project.scripts]
+council = "council.cli.main:main"
+thecouncil = "council.cli.main:main"
+
 [tool.ruff]
 target-version = "py312"
 line-length = 100
