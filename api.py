@@ -28,6 +28,7 @@ Usage (dev):
 
 from __future__ import annotations
 
+import asyncio
 import os
 import secrets
 import time
@@ -41,12 +42,16 @@ from fastapi.middleware.cors import CORSMiddleware  # type: ignore
 from fastapi.responses import JSONResponse  # type: ignore
 from pydantic import BaseModel, Field
 
+from council_runner import CouncilRunBlockedError, run_council_for_api
+from mcp.server.fastmcp import FastMCP
 from run_state import (
     Run,
     RunNotFoundError,
+    RunStatus,
     run_queue,
     run_store,
 )
+from sandbox_runner import SandboxDisabledError, run_sandbox_task
 from subscriptions import (
     TierName,
     get_tier,
@@ -61,6 +66,8 @@ app = FastAPI(
     version="0.1.0",
 )
 
+_mcp = FastMCP("TheCouncil")
+
 _cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
@@ -69,6 +76,101 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.mount("/mcp", _mcp.streamable_http_app())
+
+_worker_task: asyncio.Task[None] | None = None
+
+
+async def _run_worker_loop() -> None:
+    while True:
+        run_id = await run_queue.dequeue()
+        try:
+            run = await run_store.update_status(run_id, RunStatus.RUNNING)
+            run_kind = str((run.config or {}).get("run_kind") or "council").strip().lower()
+            if run_kind == "sandbox":
+                tier = _resolve_request_tier()
+                if not get_tier(tier).limits.computer_use_enabled:
+                    raise SandboxDisabledError("Computer-use sandbox requires Ultra or Enterprise.")
+                result = await run_sandbox_task(question=run.question, config=run.config)
+            else:
+                result = await run_council_for_api(
+                    question=run.question,
+                    config=run.config,
+                    owner_id=run.owner_id,
+                )
+            await run_store.update_status(run_id, RunStatus.COMPLETED, result=result)
+        except CouncilRunBlockedError as exc:
+            await run_store.update_status(run_id, RunStatus.FAILED, error=str(exc))
+        except SandboxDisabledError as exc:
+            await run_store.update_status(run_id, RunStatus.FAILED, error=str(exc))
+        except Exception as exc:
+            await run_store.update_status(run_id, RunStatus.FAILED, error=f"{type(exc).__name__}: {exc}")
+        finally:
+            run_queue.task_done()
+
+
+@app.on_event("startup")
+async def _startup_worker() -> None:
+    global _worker_task
+    if os.getenv("COUNCIL_DISABLE_WORKER", ""):
+        return
+    if _worker_task is None or _worker_task.done():
+        _worker_task = asyncio.create_task(_run_worker_loop())
+
+
+@app.on_event("shutdown")
+async def _shutdown_worker() -> None:
+    global _worker_task
+    if _worker_task is not None:
+        _worker_task.cancel()
+        _worker_task = None
+
+
+def _require_mcp_enabled(owner_id: str) -> None:
+    tier = _resolve_request_tier()
+    limits = get_tier(tier).limits
+    if not limits.mcp_enabled:
+        raise RuntimeError("MCP integrations require Pro, Ultra, or Enterprise.")
+    expected = _get_api_secret()
+    if not secrets.compare_digest(owner_id, expected):
+        raise RuntimeError("Invalid API token.")
+
+
+@_mcp.tool()
+async def council_run(question: str, config: dict[str, Any] | None = None, api_key: str | None = None) -> dict[str, Any]:
+    """Create and enqueue a council run. Returns the run_id and initial status."""
+    owner_id = api_key or ""
+    _require_mcp_enabled(owner_id)
+    run = await run_store.create(question=question, config=config or {}, owner_id=owner_id)
+    await run_queue.enqueue(run.run_id)
+    return {"run_id": run.run_id, "status": run.status.value, "question": run.question, "created_at": run.created_at}
+
+
+@_mcp.tool()
+async def sandbox_run(question: str, config: dict[str, Any] | None = None, api_key: str | None = None) -> dict[str, Any]:
+    """Create and enqueue an Ultra-only sandbox run."""
+    owner_id = api_key or ""
+    _require_mcp_enabled(owner_id)
+    tier = _resolve_request_tier()
+    if not get_tier(tier).limits.computer_use_enabled:
+        raise RuntimeError("Computer-use sandbox requires Ultra or Enterprise.")
+    run_cfg = dict(config or {})
+    run_cfg["run_kind"] = "sandbox"
+    run = await run_store.create(question=question, config=run_cfg, owner_id=owner_id)
+    await run_queue.enqueue(run.run_id)
+    return {"run_id": run.run_id, "status": run.status.value, "question": run.question, "created_at": run.created_at}
+
+
+@_mcp.tool()
+async def council_poll(run_id: str, api_key: str | None = None) -> dict[str, Any]:
+    """Poll a run created via council_run."""
+    owner_id = api_key or ""
+    _require_mcp_enabled(owner_id)
+    run = await run_store.get(run_id)
+    if run.owner_id != owner_id:
+        raise RuntimeError("Run not found.")
+    return run.to_dict()
 
 
 # ---------------------------------------------------------------------------
