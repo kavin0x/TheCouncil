@@ -1,0 +1,27 @@
+[project]
+name = "thecouncil"
+version = "0.1.0"
+description = "Multi-agent council debates (FastAPI + CLI) with optional Next.js web UI"
+readme = "README.md"
+requires-python = ">=3.12"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+exclude = [
+  ".git",
+  ".venv",
+  "__pycache__",
+  "web",
+  "node_modules",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = [
+  "E501", # line length (legacy modules)
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

@@ -1,0 +1,150 @@
+const BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+
+export type TierName = "trial" | "basic" | "pro" | "ultra" | "enterprise";
+
+export interface Entitlements {
+  tier: TierName;
+  display_name: string;
+  limits: {
+    runs_per_month: number;
+    max_agents: number;
+    max_rounds: number;
+    max_input_tokens: number;
+    max_saved_personas: number | null;
+  };
+  features: {
+    api_access: boolean;
+    mcp_enabled: boolean;
+    custom_mcp_enabled: boolean;
+    ide_plugins_enabled: boolean;
+    computer_use_enabled: boolean;
+    sso_enabled: boolean;
+    centralized_billing_enabled: boolean;
+  };
+}
+
+export interface Run {
+  run_id: string;
+  question: string;
+  status: "pending" | "running" | "completed" | "failed";
+  created_at: number;
+  started_at: number | null;
+  finished_at: number | null;
+  result: Record<string, unknown> | null;
+  error: string | null;
+}
+
+export interface Persona {
+  persona_id: string;
+  name: string;
+  mode: string;
+  system_prompt: string;
+  description: string | null;
+  created_at: number;
+}
+
+export interface Usage {
+  period: string;
+  runs: { used: number; limit: number };
+}
+
+export interface Billing {
+  tier: TierName;
+  display_name: string;
+  price_usd_monthly: number;
+  status: string;
+  trial_end: number | null;
+  next_renewal: number | null;
+  stripe_customer_id: string | null;
+}
+
+async function request<T>(
+  path: string,
+  token: string,
+  options?: RequestInit
+): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      ...(options?.headers ?? {}),
+    },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ detail: res.statusText }));
+    const err = new Error(body.detail ?? "Request failed") as Error & {
+      status: number;
+    };
+    err.status = res.status;
+    throw err;
+  }
+  if (res.status === 204) return undefined as T;
+  return res.json() as Promise<T>;
+}
+
+export const api = {
+  getEntitlements: (token: string) =>
+    request<Entitlements>("/me/entitlements", token),
+
+  getUsage: (token: string) => request<Usage>("/me/usage", token),
+
+  getBilling: (token: string) => request<Billing>("/me/billing", token),
+
+  createCheckout: (
+    token: string,
+    body: { tier: string; success_url: string; cancel_url: string }
+  ) =>
+    request<{ url: string }>("/me/billing/checkout", token, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  createPortal: (token: string, return_url: string) =>
+    request<{ url: string }>("/me/billing/portal", token, {
+      method: "POST",
+      body: JSON.stringify({ return_url }),
+    }),
+
+  listRuns: (token: string) => request<Run[]>("/runs", token),
+
+  getRun: (token: string, id: string) =>
+    request<Run>(`/runs/${id}`, token),
+
+  createRun: (
+    token: string,
+    body: { question: string; config?: Record<string, unknown> }
+  ) =>
+    request<Run>("/runs", token, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  listPersonas: (token: string) =>
+    request<Persona[]>("/me/personas", token),
+
+  createPersona: (
+    token: string,
+    body: { name: string; mode: string; system_prompt: string; description?: string }
+  ) =>
+    request<Persona>("/me/personas", token, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  updatePersona: (
+    token: string,
+    id: string,
+    body: { name?: string; system_prompt?: string; description?: string }
+  ) =>
+    request<Persona>(`/me/personas/${id}`, token, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+
+  deletePersona: (token: string, id: string) =>
+    request<void>(`/me/personas/${id}`, token, { method: "DELETE" }),
+
+  health: () =>
+    fetch(`${BASE}/health`).then((r) => r.json()) as Promise<{ status: string }>,
+};

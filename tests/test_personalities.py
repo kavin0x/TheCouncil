@@ -9,7 +9,6 @@ from personalities import (
     JobRole,
     JOB_ROLE_INSTRUCTIONS,
     MBTI_TRAITS,
-    MBTIProfile,
     generate_mbti_personality,
     get_canned_personalities,
     build_agent_panel,

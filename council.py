@@ -48,9 +48,7 @@ from dotenv import load_dotenv
 from openai import AsyncOpenAI
 from rich.console import Console
 from rich.panel import Panel
-from rich.rule import Rule
 from rich.text import Text
-from rich.theme import Theme
 
 from guardrails import Guardrails
 from personalities import (
@@ -877,7 +875,6 @@ async def run_persona_questionnaire(output_path: Path) -> None:
     )
 
     questionnaire_payload = _build_full_questionnaire()
-    identity = questionnaire_payload["identity"]
     attachments = questionnaire_payload["attachments"]
 
     model_prompt = textwrap.dedent(
@@ -1779,7 +1776,7 @@ async def run_council(
     while True:
         console.rule(
             Text(
-                f"  VOTE  ·  Pick one resolution  "
+                "  VOTE  ·  Pick one resolution  "
                 + ("(tie-breaker)" if len(active_resolutions) < len(session.resolutions) else ""),
                 style="bold yellow",
             ),
