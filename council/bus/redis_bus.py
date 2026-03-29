@@ -27,6 +27,10 @@ import os
 import time
 from typing import Any, AsyncGenerator
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 log = logging.getLogger(__name__)
 
 REDIS_URL = os.getenv("REDIS_URL", "")

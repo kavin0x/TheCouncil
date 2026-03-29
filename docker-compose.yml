@@ -7,9 +7,9 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: council
-      POSTGRES_PASSWORD: council
-      POSTGRES_DB: council
+      POSTGRES_USER: ${POSTGRES_USER:-council}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-council}
+      POSTGRES_DB: ${POSTGRES_DB:-council}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
