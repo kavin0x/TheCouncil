@@ -37,6 +37,12 @@ import secrets
 import time
 import uuid
 from contextlib import asynccontextmanager
+
+from dotenv import load_dotenv
+
+if os.environ.get("PYTEST_CURRENT_TEST") is None:
+    load_dotenv()
+
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Annotated, Any

@@ -274,15 +274,24 @@ class LLMGuardrailBackend(GuardrailBackend):
             return []  # Fail open on non-event-loop errors
 
     async def screen_async(self, text: str) -> list[GuardrailViolation]:
-        """Async LLM classification."""
+        """Async LLM classification. Fails securely (returns violation) on API errors."""
+        import logging
+        log = logging.getLogger(__name__)
         try:
             input_msgs = [
                 {"role": "system", "content": _LLM_GUARDRAIL_SYSTEM},
                 {"role": "user", "content": text[:_LLM_GUARDRAIL_MAX_INPUT_CHARS]},
             ]
             raw: str = await self._api_call(input_msgs, max_tokens=120, model=self._model)
-        except Exception:
-            return []  # Fail open on API errors
+        except Exception as exc:
+            # Fail securely: log the error and return a violation to block unsafe input
+            log.error("Guardrail API error: %s", exc)
+            return [
+                GuardrailViolation(
+                    violation_type=ViolationType.INJECTION,
+                    description="Safety check failed; request blocked.",
+                )
+            ]
 
         if not raw or raw.strip().upper().startswith("CLEAN"):
             return []

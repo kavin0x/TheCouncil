@@ -61,26 +61,74 @@ export interface Billing {
 async function request<T>(
   path: string,
   token: string,
-  options?: RequestInit
+  options?: RequestInit,
+  retries: number = 3
 ): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-      ...(options?.headers ?? {}),
-    },
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({ detail: res.statusText }));
-    const err = new Error(body.detail ?? "Request failed") as Error & {
-      status: number;
-    };
-    err.status = res.status;
-    throw err;
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      const res = await fetch(`${BASE}${path}`, {
+        ...options,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "X-Requested-With": "XMLHttpRequest", // CSRF protection
+          ...(options?.headers ?? {}),
+        },
+      });
+
+      if (!res.ok) {
+        // Don't retry on client errors (4xx)
+        if (res.status >= 400 && res.status < 500) {
+          const body = await res.json().catch(() => ({ detail: res.statusText }));
+          const err = new Error(body.detail ?? "Request failed") as Error & {
+            status: number;
+          };
+          err.status = res.status;
+          throw err;
+        }
+
+        // Retry on server errors (5xx) with exponential backoff
+        if (attempt < retries - 1 && res.status >= 500) {
+          const delay = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          continue;
+        }
+
+        const body = await res.json().catch(() => ({ detail: res.statusText }));
+        const err = new Error(body.detail ?? "Request failed") as Error & {
+          status: number;
+        };
+        err.status = res.status;
+        throw err;
+      }
+
+      if (res.status === 204) return undefined as T;
+      return res.json() as Promise<T>;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      // Don't retry on client errors
+      if (lastError instanceof Error && (lastError as any).status) {
+        const status = (lastError as any).status;
+        if (status >= 400 && status < 500) {
+          throw lastError;
+        }
+      }
+
+      // Retry with exponential backoff for network errors
+      if (attempt < retries - 1) {
+        const delay = Math.pow(2, attempt) * 1000;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
   }
-  if (res.status === 204) return undefined as T;
-  return res.json() as Promise<T>;
+
+  throw (
+    lastError ??
+    new Error("Request failed after max retries")
+  );
 }
 
 export const api = {

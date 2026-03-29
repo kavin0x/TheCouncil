@@ -25,3 +25,11 @@ celery[redis]>=5.4.0
 
 # Typer-based CLI
 typer[all]>=0.12.0
+
+# Production-ready enhancements
+alembic>=1.13.0
+slowapi>=0.1.9
+python-multipart>=0.0.6
+structlog>=24.1.0
+python-json-logger>=2.0.7
+cryptography>=42.0.0

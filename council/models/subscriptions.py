@@ -387,7 +387,16 @@ def parse_webhook_event(payload: bytes, sig_header: str, webhook_secret: str) ->
     except Exception as exc:
         raise ValueError(f"Could not parse Stripe webhook payload: {exc}") from exc
 
-    return dict(event)
+    # Convert Stripe Event object to dict; handle type conversion safely
+    result: dict[str, Any] = {}
+    try:
+        if hasattr(event, 'items'):
+            result = dict(event.items())
+        else:
+            result = dict(event.__dict__)
+    except (TypeError, AttributeError):
+        pass
+    return result
 
 
 def resolve_tier_from_webhook(event: dict[str, Any]) -> TierName | None:
