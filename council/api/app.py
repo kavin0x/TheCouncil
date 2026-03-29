@@ -29,15 +29,19 @@ Usage (dev):
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
+import json
 import os
 import secrets
 import time
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status  # type: ignore
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect, status  # type: ignore
 from fastapi.middleware.cors import CORSMiddleware  # type: ignore
 from fastapi.responses import JSONResponse  # type: ignore
 from fastmcp import FastMCP
@@ -60,10 +64,24 @@ from council.models.subscriptions import (
     resolve_tier_from_webhook,
 )
 
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):  # type: ignore[type-arg]
+    global _worker_task
+    if not os.getenv("COUNCIL_DISABLE_WORKER", ""):
+        if _worker_task is None or _worker_task.done():
+            _worker_task = asyncio.create_task(_run_worker_loop())
+    yield
+    if _worker_task is not None:
+        _worker_task.cancel()
+        _worker_task = None
+
+
 app = FastAPI(
     title="TheCouncil API",
     description="REST API for creating, queuing, and polling council debate runs.",
     version="0.1.0",
+    lifespan=_lifespan,
 )
 
 _mcp = FastMCP("TheCouncil")
@@ -116,23 +134,6 @@ async def _run_worker_loop() -> None:
             run_queue.task_done()
 
 
-@app.on_event("startup")
-async def _startup_worker() -> None:
-    global _worker_task
-    if os.getenv("COUNCIL_DISABLE_WORKER", ""):
-        return
-    if _worker_task is None or _worker_task.done():
-        _worker_task = asyncio.create_task(_run_worker_loop())
-
-
-@app.on_event("shutdown")
-async def _shutdown_worker() -> None:
-    global _worker_task
-    if _worker_task is not None:
-        _worker_task.cancel()
-        _worker_task = None
-
-
 def _require_mcp_enabled(owner_id: str) -> None:
     tier = _resolve_request_tier()
     limits = get_tier(tier).limits
@@ -170,13 +171,154 @@ async def sandbox_run(question: str, config: dict[str, Any] | None = None, api_k
 
 @_mcp.tool()
 async def council_poll(run_id: str, api_key: str | None = None) -> dict[str, Any]:
-    """Poll a run created via council_run."""
+    """Poll a run created via council_run. Alias: council_status."""
     owner_id = api_key or ""
     _require_mcp_enabled(owner_id)
     run = await run_store.get(run_id)
     if run.owner_id != owner_id:
         raise RuntimeError("Run not found.")
     return run.to_dict()
+
+
+@_mcp.tool()
+async def council_status(run_id: str, api_key: str | None = None) -> dict[str, Any]:
+    """Return the current status of a council run (PENDING | RUNNING | COMPLETED | FAILED)."""
+    return await council_poll(run_id=run_id, api_key=api_key)
+
+
+@_mcp.tool()
+async def council_artifact(run_id: str, format: str = "json", api_key: str | None = None) -> dict[str, Any]:
+    """Retrieve the structured deliberation artifact for a completed run.
+
+    Args:
+        run_id: The run identifier returned by council_run.
+        format:  Output format — "json" (default) or "markdown".
+        api_key: Bearer token for authentication.
+
+    Returns a structured artifact with:
+      - decision_rationale: synthesis of the debate
+      - recommended_action: winning resolution
+      - dissenting_opinions: minority positions
+      - top3_resolutions: ranked list of proposals
+    """
+    owner_id = api_key or ""
+    _require_mcp_enabled(owner_id)
+
+    try:
+        run = await run_store.get(run_id)
+    except RunNotFoundError:
+        raise RuntimeError(f"Run not found: {run_id!r}")
+
+    if run.owner_id != owner_id:
+        raise RuntimeError("Run not found.")
+
+    if run.status is not RunStatus.COMPLETED:
+        return {
+            "run_id": run_id,
+            "status": run.status.value,
+            "artifact": None,
+            "message": f"Run is {run.status.value}. Artifact available only after completion.",
+        }
+
+    result = run.result or {}
+    artifact = _build_artifact_from_result(run_id, run.question, result)
+
+    if format == "markdown":
+        return {
+            "run_id": run_id,
+            "status": run.status.value,
+            "format": "markdown",
+            "artifact": artifact["markdown"],
+        }
+
+    return {"run_id": run_id, "status": run.status.value, "format": "json", "artifact": artifact["data"]}
+
+
+def _build_artifact_from_result(run_id: str, question: str, result: dict[str, Any]) -> dict[str, Any]:
+    """Build a structured artifact dict from a completed run result."""
+    top3 = result.get("top3", [])
+    resolutions = result.get("resolutions", {})
+    vote_rounds = result.get("vote_rounds", [])
+    winner = result.get("winner", "")
+    final_resolution = result.get("final_resolution", "")
+    agents_in_run = result.get("agents", [])
+
+    # Decision rationale from top-3 analysis
+    rationale_parts = []
+    for res in top3:
+        summary = res.get("summary", "")
+        agent = res.get("agent", "")
+        role = res.get("role", "")
+        if summary:
+            rationale_parts.append(f"**{agent} ({role})**: {summary}")
+    decision_rationale = "\n\n".join(rationale_parts) or final_resolution
+
+    # Dissenting opinions
+    dissenting = []
+    for agent_info in agents_in_run:
+        agent_name = agent_info.get("name", "")
+        if agent_name == winner:
+            continue
+        agent_resolution = resolutions.get(agent_name, "")
+        if agent_resolution and agent_resolution != final_resolution:
+            dissenting.append({
+                "agent": agent_name,
+                "role": agent_info.get("role", ""),
+                "opinion": agent_resolution,
+            })
+
+    data = {
+        "artifact_id": f"art-{run_id}",
+        "run_id": run_id,
+        "question": question,
+        "decision_rationale": decision_rationale,
+        "recommended_action": final_resolution,
+        "dissenting_opinions": dissenting,
+        "consensus_resolution": final_resolution,
+        "agent_votes": {"rounds": vote_rounds, "winner": winner},
+        "top3_resolutions": top3,
+    }
+
+    # Markdown rendering
+    md_lines = [
+        "# TheCouncil Deliberation Artifact",
+        "",
+        f"**Question:** {question}",
+        "",
+        "---",
+        "",
+        "## Decision Rationale",
+        "",
+        decision_rationale,
+        "",
+        "## Recommended Action",
+        "",
+        final_resolution,
+        "",
+    ]
+
+    if dissenting:
+        md_lines += ["## Dissenting Opinions", ""]
+        for opinion in dissenting:
+            md_lines += [f"**{opinion['agent']}:** {opinion['opinion']}", ""]
+
+    if top3:
+        md_lines += ["## Top Resolutions", ""]
+        for res in top3:
+            rank = res.get("rank", "?")
+            agent = res.get("agent", "")
+            resolution = res.get("resolution", "")
+            summary = res.get("summary", "")
+            md_lines += [
+                f"### Resolution #{rank} — {agent}",
+                "",
+                resolution,
+                "",
+                f"*{summary}*",
+                "",
+            ]
+
+    return {"data": data, "markdown": "\n".join(md_lines)}
 
 
 # ---------------------------------------------------------------------------
@@ -392,6 +534,59 @@ async def list_runs(
     """Return all runs owned by the authenticated user, newest first."""
     runs = await run_store.list_runs(owner_id=auth.owner_id)
     return [RunResponse.from_run(r) for r in runs]
+
+
+@app.get(
+    "/runs/{run_id}/artifact",
+    summary="Get the structured deliberation artifact for a completed run",
+)
+async def get_run_artifact(
+    run_id: str,
+    format: str = "json",
+    auth: Annotated[AuthContext, Depends(require_auth)] = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    """Return the deliberation artifact for a completed run.
+
+    Args:
+        format: ``json`` (default) or ``markdown``
+
+    The artifact contains:
+    - ``decision_rationale`` — synthesis of the debate
+    - ``recommended_action`` — the winning resolution
+    - ``dissenting_opinions`` — minority positions that didn't win
+    - ``top3_resolutions`` — ranked list of proposals
+    """
+    try:
+        run = await run_store.get(run_id)
+    except RunNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found.")
+    if run.owner_id != auth.owner_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found.")
+
+    if run.status is not RunStatus.COMPLETED:
+        return {
+            "run_id": run_id,
+            "status": run.status.value,
+            "artifact": None,
+            "message": f"Run is {run.status.value}. Artifact available only after completion.",
+        }
+
+    result = run.result or {}
+    artifact = _build_artifact_from_result(run_id, run.question, result)
+
+    if format == "markdown":
+        return {
+            "run_id": run_id,
+            "status": run.status.value,
+            "format": "markdown",
+            "artifact": artifact["markdown"],
+        }
+    return {
+        "run_id": run_id,
+        "status": run.status.value,
+        "format": "json",
+        "artifact": artifact["data"],
+    }
 
 
 @app.get(
@@ -721,3 +916,237 @@ async def delete_persona(
 @app.get("/health", include_in_schema=False)
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# WebSocket — real-time deliberation feed
+# ---------------------------------------------------------------------------
+
+# In-process pub-sub: run_id -> set of active WebSocket connections.
+# In production (multi-process), replace with Redis pub/sub.
+_ws_connections: dict[str, set[WebSocket]] = {}
+
+
+async def _ws_broadcast(run_id: str, event: dict[str, Any]) -> None:
+    """Broadcast a JSON event to all WebSocket subscribers for a run."""
+    sockets = set(_ws_connections.get(run_id, set()))
+    if not sockets:
+        return
+    payload = json.dumps(event, default=str)
+    dead: list[WebSocket] = []
+    for ws in sockets:
+        try:
+            await ws.send_text(payload)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        _ws_connections.get(run_id, set()).discard(ws)
+
+
+@app.websocket("/ws/{run_id}")
+async def run_websocket(websocket: WebSocket, run_id: str) -> None:
+    """WebSocket endpoint for real-time deliberation event streaming.
+
+    Clients connect to ``ws://<host>/ws/<run_id>`` and receive JSON events:
+      {"type": "run_started" | "agent_response" | "agent_dm" | "run_completed" | "run_failed",
+       "run_id": "...", "ts": 1234567890.0, ...}
+
+    Authentication: pass token as query param ``?token=<bearer_token>``.
+    The connection is closed with code 4001 if the token is invalid.
+    """
+    token = websocket.query_params.get("token", "")
+    try:
+        expected = _get_api_secret()
+    except RuntimeError:
+        await websocket.close(code=4000)
+        return
+
+    if not token or not secrets.compare_digest(token, expected):
+        await websocket.close(code=4001)
+        return
+
+    await websocket.accept()
+
+    if run_id not in _ws_connections:
+        _ws_connections[run_id] = set()
+    _ws_connections[run_id].add(websocket)
+
+    try:
+        # Send current run state immediately so the client can bootstrap
+        try:
+            run = await run_store.get(run_id)
+            await websocket.send_text(json.dumps({
+                "type": "run_snapshot",
+                "run_id": run_id,
+                "status": run.status.value,
+                "result": run.result,
+                "error": run.error,
+                "ts": time.time(),
+            }, default=str))
+        except RunNotFoundError:
+            await websocket.send_text(json.dumps({
+                "type": "error",
+                "run_id": run_id,
+                "message": "Run not found.",
+                "ts": time.time(),
+            }))
+            return
+
+        # Stream events from Redis bus if available
+        from council.bus.redis_bus import bus
+        if hasattr(bus, "_redis"):
+            # Redis bus: tail the stream
+            async for event in bus.read_run_events(run_id):
+                await websocket.send_text(json.dumps(event, default=str))
+                if event.get("type") in ("run_completed", "run_failed"):
+                    break
+        else:
+            # Null bus: poll the in-process run store until terminal state
+            while True:
+                try:
+                    run = await run_store.get(run_id)
+                except RunNotFoundError:
+                    break
+                if run.status in (RunStatus.COMPLETED, RunStatus.FAILED):
+                    await websocket.send_text(json.dumps({
+                        "type": "run_completed" if run.status is RunStatus.COMPLETED else "run_failed",
+                        "run_id": run_id,
+                        "status": run.status.value,
+                        "ts": time.time(),
+                    }, default=str))
+                    break
+                await asyncio.sleep(2)
+
+    except WebSocketDisconnect:
+        pass
+    finally:
+        _ws_connections.get(run_id, set()).discard(websocket)
+
+
+# ---------------------------------------------------------------------------
+# Zoom webhook — post artifact summary to Zoom chat on run completion
+# ---------------------------------------------------------------------------
+
+
+@app.post(
+    "/webhooks/zoom",
+    include_in_schema=False,
+    summary="Zoom webhook receiver",
+)
+async def zoom_webhook(request: Request) -> JSONResponse:
+    """Receive Zoom webhook events and post artifact summaries to Zoom chat.
+
+    Verifies the Zoom-Signature (v0) using ZOOM_WEBHOOK_SECRET_TOKEN.
+    Handles:
+      - ``endpoint.url_validation`` — Zoom endpoint validation challenge
+      - ``meeting.ended`` — posts artifact summary to the meeting chat
+    """
+    payload_bytes = await request.body()
+    zoom_secret = os.getenv("ZOOM_WEBHOOK_SECRET_TOKEN", "")
+
+    # Decode payload early — reject with 400 if not valid UTF-8
+    try:
+        payload_text = payload_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="Request body is not valid UTF-8.")
+
+    # Validate Zoom signature if secret is configured
+    if zoom_secret:
+        ts = request.headers.get("x-zm-request-timestamp", "")
+        signature = request.headers.get("x-zm-signature", "")
+        message = f"v0:{ts}:{payload_text}"
+        expected_sig = "v0=" + hmac.new(
+            zoom_secret.encode(), message.encode(), hashlib.sha256
+        ).hexdigest()
+        if not hmac.compare_digest(signature, expected_sig):
+            raise HTTPException(status_code=400, detail="Invalid Zoom signature.")
+
+    try:
+        event: dict[str, Any] = json.loads(payload_text)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload.")
+
+    event_type = event.get("event", "")
+
+    # Zoom endpoint URL validation (required by Zoom when registering)
+    if event_type == "endpoint.url_validation":
+        plain_token = (event.get("payload") or {}).get("plainToken", "")
+        if zoom_secret and plain_token:
+            encrypted = hmac.new(
+                zoom_secret.encode(), plain_token.encode(), hashlib.sha256
+            ).hexdigest()
+        else:
+            encrypted = plain_token
+        return JSONResponse(
+            content={"plainToken": plain_token, "encryptedToken": encrypted}
+        )
+
+    # Post artifact summary on meeting end (if a run_id is in the meeting topic)
+    if event_type == "meeting.ended":
+        meeting_obj = (event.get("payload") or {}).get("object", {})
+        topic: str = meeting_obj.get("topic", "")
+        chat_channel = meeting_obj.get("chat_channel_id", "")
+
+        run_id = _extract_run_id_from_topic(topic)
+        if run_id:
+            asyncio.create_task(
+                _post_zoom_artifact_summary(run_id=run_id, channel_id=chat_channel)
+            )
+
+    return JSONResponse(content={"received": True})
+
+
+def _extract_run_id_from_topic(topic: str) -> str | None:
+    """Extract a council run_id embedded in a Zoom meeting topic.
+
+    Convention: meeting topic contains ``[council:<run_id>]``.
+    """
+    import re
+    match = re.search(r"\[council:([^\]]+)\]", topic)
+    return match.group(1) if match else None
+
+
+async def _post_zoom_artifact_summary(run_id: str, channel_id: str) -> None:
+    """Post a markdown artifact summary to a Zoom chat channel via the Zoom API."""
+    zoom_token = os.getenv("ZOOM_API_TOKEN", "")
+    if not zoom_token or not channel_id:
+        return
+
+    try:
+        run = await run_store.get(run_id)
+    except RunNotFoundError:
+        return
+
+    if run.status is not RunStatus.COMPLETED or not run.result:
+        return
+
+    artifact = _build_artifact_from_result(run_id, run.question, run.result)
+    summary_md = artifact["markdown"]
+    # Zoom chat messages have a 4 000 char limit — truncate at a safe character boundary
+    _zoom_limit = 3900
+    if len(summary_md) > _zoom_limit:
+        # Truncate to the last newline before the limit to avoid splitting mid-word
+        truncated = summary_md[:_zoom_limit]
+        last_newline = truncated.rfind("\n")
+        if last_newline > _zoom_limit // 2:
+            truncated = truncated[:last_newline]
+        summary_md = truncated + "\n\n*[truncated — view full artifact via API]*"
+
+    try:
+        import httpx  # type: ignore[import]
+
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                f"https://api.zoom.us/v2/chat/channels/{channel_id}/messages",
+                headers={
+                    "Authorization": f"Bearer {zoom_token}",
+                    "Content-Type": "application/json",
+                },
+                json={"message": summary_md},
+            )
+            resp.raise_for_status()
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Failed to post Zoom artifact for run %s: %s", run_id, exc
+        )
