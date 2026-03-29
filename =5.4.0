@@ -1,2 +1,0 @@
-WARNING: typer 0.24.1 does not provide the extra 'all'
-WARNING: redis 7.4.0 does not provide the extra 'asyncio'
