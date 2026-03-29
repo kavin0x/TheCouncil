@@ -13,9 +13,6 @@ mcp>=1.26.0
 fastmcp>=0.2.0
 e2b>=2.19.0
 
-# Anthropic Claude primary LLM
-anthropic>=0.40.0
-
 # Database (PostgreSQL async)
 asyncpg>=0.29.0
 sqlalchemy[asyncio]>=2.0.0

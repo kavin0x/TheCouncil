@@ -297,30 +297,11 @@ def _get_xai_client() -> AsyncOpenAI:
     return _xai_client
 
 
-def get_client_for_model(model: str) -> tuple[Any, str]:
-    """Return (client, resolved_model) for the given model.
-
-    Resolution order:
-    1. Anthropic SDK — when ANTHROPIC_API_KEY is set and model is a Claude model.
-    2. XAI native API — when XAI_API_KEY is set and model is a Grok model.
-    3. OpenRouter — all other models (default fallback).
-    """
-    from council.providers.anthropic_provider import (
-        get_anthropic_adapter,
-        is_claude_model,
-        resolve_claude_model,
-    )
-
+def get_client_for_model(model: str) -> tuple[AsyncOpenAI, str]:
+    """Return (client, resolved_model) for the given model. Uses XAI API when available for Grok models."""
     model = (model or MODEL).split(":")[0]
-
-    if is_claude_model(model) and os.getenv("ANTHROPIC_API_KEY"):
-        adapter = get_anthropic_adapter()
-        if adapter is not None:
-            return adapter, resolve_claude_model(model)
-
     if model in XAI_MODEL_MAP and os.getenv("XAI_API_KEY"):
         return _get_xai_client(), XAI_MODEL_MAP[model]
-
     return _get_openrouter_client(), model
 
 
