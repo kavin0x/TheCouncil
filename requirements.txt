@@ -12,3 +12,19 @@ pytest-asyncio>=0.23.0
 mcp>=1.26.0
 fastmcp>=0.2.0
 e2b>=2.19.0
+
+# Anthropic Claude primary LLM
+anthropic>=0.40.0
+
+# Database (PostgreSQL async)
+asyncpg>=0.29.0
+sqlalchemy[asyncio]>=2.0.0
+
+# Cache / message bus (Redis Streams)
+redis[asyncio]>=5.0.0
+
+# Background task orchestration (Celery + Redis broker)
+celery[redis]>=5.4.0
+
+# Typer-based CLI
+typer[all]>=0.12.0
