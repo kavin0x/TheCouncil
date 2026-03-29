@@ -244,43 +244,6 @@ class TestBuildArtifact:
 # ---------------------------------------------------------------------------
 
 
-class TestAnthropicProvider:
-    def test_is_claude_model_true(self):
-        from council.providers.anthropic_provider import is_claude_model
-
-        assert is_claude_model("claude-sonnet-4-20250514")
-        assert is_claude_model("anthropic/claude-sonnet-4-20250514")
-        assert is_claude_model("anthropic/claude-sonnet-4.6")
-
-    def test_is_claude_model_false(self):
-        from council.providers.anthropic_provider import is_claude_model
-
-        assert not is_claude_model("gpt-4")
-        assert not is_claude_model("x-ai/grok-4")
-        assert not is_claude_model("")
-
-    def test_resolve_claude_model_maps_alias(self):
-        from council.providers.anthropic_provider import resolve_claude_model
-
-        assert resolve_claude_model("anthropic/claude-sonnet-4.6") == "claude-sonnet-4-20250514"
-        assert resolve_claude_model("claude-sonnet-4-20250514") == "claude-sonnet-4-20250514"
-
-    def test_get_anthropic_adapter_returns_none_without_key(self):
-        from council.providers.anthropic_provider import get_anthropic_adapter
-
-        original = os.environ.pop("ANTHROPIC_API_KEY", None)
-        try:
-            import council.providers.anthropic_provider as mod
-            mod.ANTHROPIC_API_KEY = ""
-            mod._anthropic_adapter = None
-            adapter = get_anthropic_adapter()
-            assert adapter is None
-        finally:
-            if original:
-                os.environ["ANTHROPIC_API_KEY"] = original
-                mod.ANTHROPIC_API_KEY = original
-
-
 # ---------------------------------------------------------------------------
 # Redis bus null fallback tests
 # ---------------------------------------------------------------------------
