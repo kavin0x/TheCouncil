@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Plus_Jakarta_Sans } from "next/font/google";
+import { Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 
@@ -9,10 +9,16 @@ const fontSans = Plus_Jakarta_Sans({
   variable: "--font-sans",
 });
 
+const fontMono = JetBrains_Mono({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-mono",
+});
+
 export const metadata: Metadata = {
-  title: "TheCouncil — AI Debate Platform",
+  title: "TheCouncil — Multi-agent deliberation engine",
   description:
-    "Multi-agent AI council debates. Get richer answers through structured expert dialogue.",
+    "Run structured multi-agent AI debates. Get rigorously stress-tested answers through expert council deliberation.",
 };
 
 export default function RootLayout({
@@ -21,8 +27,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`dark ${fontSans.variable}`}>
-      <body className="min-h-screen antialiased">
+    <html
+      lang="en"
+      className={`${fontSans.variable} ${fontMono.variable}`}
+      suppressHydrationWarning
+    >
+      <body className="min-h-screen antialiased" suppressHydrationWarning>
         <Providers>{children}</Providers>
       </body>
     </html>

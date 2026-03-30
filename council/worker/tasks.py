@@ -51,7 +51,7 @@ async def _execute_run_async(task: Task, run_id: str) -> dict[str, Any]:
     from council.core.runner import CouncilRunBlockedError, run_council_for_api
     from council.features.sandbox import SandboxDisabledError, run_sandbox_task
     from council.models.subscriptions import get_tier, TierName
-    from council.bus.redis_bus import bus
+    from council.realtime import emit_run_event
 
     start = time.monotonic()
 
@@ -61,7 +61,7 @@ async def _execute_run_async(task: Task, run_id: str) -> dict[str, Any]:
         log.error("Could not transition run %s to RUNNING: %s", run_id, exc)
         raise
 
-    await bus.publish_event(run_id, "run_started", {"run_id": run_id})
+    await emit_run_event(run_id, "run_started", {"run_id": run_id})
 
     try:
         run_kind = str((run.config or {}).get("run_kind") or "council").strip().lower()
@@ -80,12 +80,13 @@ async def _execute_run_async(task: Task, run_id: str) -> dict[str, Any]:
                 question=run.question,
                 config=run.config,
                 owner_id=run.owner_id,
+                run_id=run_id,
             )
 
         await run_store.update_status(run_id, RunStatus.COMPLETED, result=result)
 
         elapsed_ms = int((time.monotonic() - start) * 1000)
-        await bus.publish_event(
+        await emit_run_event(
             run_id,
             "run_completed",
             {
@@ -104,7 +105,7 @@ async def _execute_run_async(task: Task, run_id: str) -> dict[str, Any]:
     except (CouncilRunBlockedError, SandboxDisabledError) as exc:
         error_msg = str(exc)
         await run_store.update_status(run_id, RunStatus.FAILED, error=error_msg)
-        await bus.publish_event(run_id, "run_failed", {"run_id": run_id, "error": error_msg})
+        await emit_run_event(run_id, "run_failed", {"run_id": run_id, "error": error_msg})
         return {"error": error_msg}
 
     except Exception as exc:
@@ -116,7 +117,7 @@ async def _execute_run_async(task: Task, run_id: str) -> dict[str, Any]:
             raise task.retry(exc=exc)
 
         await run_store.update_status(run_id, RunStatus.FAILED, error=error_msg)
-        await bus.publish_event(run_id, "run_failed", {"run_id": run_id, "error": error_msg})
+        await emit_run_event(run_id, "run_failed", {"run_id": run_id, "error": error_msg})
         return {"error": error_msg}
 
 
