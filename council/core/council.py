@@ -39,7 +39,7 @@ import textwrap
 import time
 from typing import Any, cast
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -150,6 +150,7 @@ class DebateSession:
     model: str = MODEL
     stream_cross_debate: bool = True
     show_dm_indicators: bool = True
+    on_stream_delta: Callable[[str, int, str], Awaitable[None]] | None = None
     rounds: list[list[AgentResponse]] = field(default_factory=list)
     dms: list[DM] = field(default_factory=list)
     inbox: dict[str, list[tuple[str, str]]] = field(
@@ -1085,8 +1086,9 @@ async def api_stream(
     input_msgs: Sequence[dict],
     max_tokens: int = 1024,
     model: str | None = None,
+    on_output_delta: Callable[[str], Awaitable[None]] | None = None,
 ) -> str:
-    """Streaming async call — prints tokens live. Use only in sequential context."""
+    """Streaming async call — prints tokens live, or invokes *on_output_delta* per chunk (headless)."""
     client, resolved_model = get_client_for_model(model or MODEL)
     collected: list[str] = []
     async with client.responses.stream(
@@ -1099,8 +1101,12 @@ async def api_stream(
                 delta = event.delta or ""
                 if delta:
                     collected.append(delta)
-                    console.print(delta, end="", markup=False)
-    console.print()
+                    if on_output_delta is not None:
+                        await on_output_delta(delta)
+                    else:
+                        console.print(delta, end="", markup=False)
+    if on_output_delta is None:
+        console.print()
     return "".join(collected)
 
 
@@ -1345,7 +1351,13 @@ async def _agent_cross_debate(
     model = agent.model or session.model
     start = time.monotonic()
     if session.stream_cross_debate:
-        content = (await api_stream(input_msgs, model=model)).strip()
+        on_delta: Callable[[str], Awaitable[None]] | None = None
+        if session.on_stream_delta is not None:
+
+            async def on_delta(d: str) -> None:
+                await session.on_stream_delta(agent.name, round_num, d)
+
+        content = (await api_stream(input_msgs, model=model, on_output_delta=on_delta)).strip()
     else:
         content = (await api_call(input_msgs, model=model)).strip()
         console.print(content, markup=False)
@@ -1405,7 +1417,13 @@ async def _agent_tiebreaker_debate(
     model = agent.model or session.model
     start = time.monotonic()
     if session.stream_cross_debate:
-        content = (await api_stream(input_msgs, model=model)).strip()
+        on_delta_tb: Callable[[str], Awaitable[None]] | None = None
+        if session.on_stream_delta is not None:
+
+            async def on_delta_tb(d: str) -> None:
+                await session.on_stream_delta(agent.name, round_num, d)
+
+        content = (await api_stream(input_msgs, model=model, on_output_delta=on_delta_tb)).strip()
     else:
         content = (await api_call(input_msgs, model=model)).strip()
         console.print(content, markup=False)

@@ -15,6 +15,7 @@ from rich.console import Console
 from council.core import council
 from council.features.guardrails import Guardrails
 from council.features.personalities import PersonalityMode
+from council.realtime import emit_run_event
 
 
 DEFAULT_CONFIG_PATH = Path(__file__).parent.parent.parent / "agents.yaml"
@@ -64,6 +65,7 @@ async def run_council_for_api(
     question: str,
     config: dict[str, Any] | None = None,
     owner_id: str | None = None,
+    run_id: str | None = None,
     config_path: Path | None = None,
 ) -> dict[str, Any]:
     """Run a council debate headlessly and return a JSON-safe dict result.
@@ -120,23 +122,78 @@ async def run_council_for_api(
         max_agents = _effective_num_agents(cfg, default=len(agents))
         agents = agents[:max_agents]
 
+        stream_for_api = run_id is not None
         session = council.DebateSession(
             question=question,
             agents=agents,
             model=settings.get("model", council.MODEL),
-            stream_cross_debate=False,  # headless: deterministic, no token streaming
+            stream_cross_debate=stream_for_api,
             show_dm_indicators=False,
         )
+        if run_id:
+
+            async def _on_stream_delta(agent_name: str, rn: int, delta: str) -> None:
+                await emit_run_event(
+                    run_id,
+                    "agent_delta",
+                    {"agent": agent_name, "round_num": rn, "delta": delta},
+                )
+
+            session.on_stream_delta = _on_stream_delta
+            await emit_run_event(
+                run_id,
+                "agents_announced",
+                {"agents": [{"name": a.name, "role": a.role} for a in agents]},
+            )
+
+        async def emit_response(resp: council.AgentResponse, phase: str) -> None:
+            if not run_id:
+                return
+            await emit_run_event(
+                run_id,
+                "agent_response",
+                {
+                    "agent": resp.agent.name,
+                    "role": resp.agent.role,
+                    "round_num": resp.round_num,
+                    "content": resp.content,
+                    "phase": phase,
+                },
+            )
+
+        async def emit_dm(dm: council.DM) -> None:
+            council.deliver_dm(dm, session)
+            if run_id:
+                await emit_run_event(
+                    run_id,
+                    "agent_dm",
+                    {
+                        "sender": dm.sender,
+                        "recipient": dm.recipient,
+                        "content": dm.content,
+                        "round_num": dm.round_num,
+                    },
+                )
 
         num_rounds = _effective_num_rounds(cfg)
 
-        # Round 1 (parallel)
-        r1_results = await council.asyncio.gather(*[council._agent_round1(a, session) for a in agents])
-        round1_responses = [res for res, _dm in r1_results]
+        # Round 1 (parallel — emit each agent as it finishes; preserve agent order in session)
+        async def _round1_indexed(i: int, agent: council.Agent) -> tuple[int, tuple[council.AgentResponse, council.DM | None]]:
+            r = await council._agent_round1(agent, session)
+            return i, r
+
+        r1_tasks = [_round1_indexed(i, a) for i, a in enumerate(agents)]
+        r1_by_index: dict[int, tuple[council.AgentResponse, council.DM | None]] = {}
+        for coro in council.asyncio.as_completed(r1_tasks):
+            i, (resp, dm) = await coro
+            r1_by_index[i] = (resp, dm)
+            await emit_response(resp, "round1")
+        round1_responses = [r1_by_index[j][0] for j in range(len(agents))]
         session.rounds.append(round1_responses)
-        for _res, dm in r1_results:
+        for j in range(len(agents)):
+            _r, dm = r1_by_index[j]
             if dm:
-                council.deliver_dm(dm, session)
+                await emit_dm(dm)
 
         # Round 2 (sequential)
         if num_rounds >= 2:
@@ -144,8 +201,9 @@ async def run_council_for_api(
             for a in agents:
                 resp, dm = await council._agent_cross_debate(a, session, 2, round2_responses)
                 round2_responses.append(resp)
+                await emit_response(resp, "cross_debate_1")
                 if dm:
-                    council.deliver_dm(dm, session)
+                    await emit_dm(dm)
             session.rounds.append(round2_responses)
 
         # Round 3 (private deliberation)
@@ -153,7 +211,7 @@ async def run_council_for_api(
             dm_batches = await council.asyncio.gather(*[council._dm_only_round(a, session) for a in agents])
             for batch in dm_batches:
                 for dm in batch:
-                    council.deliver_dm(dm, session)
+                    await emit_dm(dm)
 
         # Round 4 (sequential)
         if num_rounds >= 4:
@@ -161,8 +219,9 @@ async def run_council_for_api(
             for a in agents:
                 resp, dm = await council._agent_cross_debate(a, session, 4, round4_responses)
                 round4_responses.append(resp)
+                await emit_response(resp, "cross_debate_2")
                 if dm:
-                    council.deliver_dm(dm, session)
+                    await emit_dm(dm)
             session.rounds.append(round4_responses)
 
         # Propose resolutions
@@ -207,6 +266,7 @@ async def run_council_for_api(
                     a, session, tiebreaker_round_num, active_resolutions, tiebreaker_responses
                 )
                 tiebreaker_responses.append(resp)
+                await emit_response(resp, "tiebreaker")
             session.rounds.append(tiebreaker_responses)
             tiebreaker_round_num += 1
 

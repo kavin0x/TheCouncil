@@ -153,6 +153,12 @@ export default function IntegrationsPage() {
           <div className="text-sm text-zinc-500">
             <p className="font-medium text-zinc-300 mb-2">MCP server URL</p>
             <CodeBlock code={`${API_BASE}/mcp`} lang="url" />
+            <p className="mt-2 text-xs text-zinc-500">
+              Local dev: use <code className="rounded bg-zinc-800 px-1">NEXT_PUBLIC_API_BASE_URL=http://localhost:3000</code>{" "}
+              so this URL hits Next; <code className="rounded bg-zinc-800 px-1">app/mcp/[[...path]]/route.ts</code> proxies to the API and
+              forwards <code className="rounded bg-zinc-800 px-1">Authorization</code> (Next rewrites do not). Override the API origin with{" "}
+              <code className="rounded bg-zinc-800 px-1">MCP_PROXY_TARGET</code> if needed. Same <code className="rounded bg-zinc-800 px-1">Bearer</code> as REST.
+            </p>
           </div>
         </CardContent>
       </Card>

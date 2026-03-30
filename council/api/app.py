@@ -51,9 +51,12 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket,
 from fastapi.middleware.cors import CORSMiddleware  # type: ignore
 from fastapi.responses import JSONResponse  # type: ignore
 from fastmcp import FastMCP
+from fastmcp.server.dependencies import get_http_request
+from fastmcp.utilities.lifespan import combine_lifespans
 from pydantic import BaseModel, Field
 
 from council.core.runner import CouncilRunBlockedError, run_council_for_api
+from council.realtime import emit_run_event, register_ws_broadcast
 from council.models.state import (
     Run,
     RunNotFoundError,
@@ -71,6 +74,55 @@ from council.models.subscriptions import (
 )
 
 
+def _get_api_secret() -> str:
+    """Return the configured API secret key, raising if absent."""
+    secret = os.getenv("API_SECRET_KEY", "")
+    if not secret:
+        raise RuntimeError(
+            "API_SECRET_KEY environment variable is not set. "
+            "Set it before starting the server."
+        )
+    return secret
+
+
+def _resolve_request_tier() -> TierName:
+    """Resolve caller tier from env for now; DB-backed mapping comes next."""
+    raw = os.getenv("DEFAULT_SUBSCRIPTION_TIER", TierName.BASIC.value).strip().lower()
+    try:
+        return TierName(raw)
+    except ValueError:
+        return TierName.BASIC
+
+
+def _mcp_bearer_from_request() -> str | None:
+    """Read Bearer token from the current MCP HTTP request (no FastMCP HTTP auth layer).
+
+    Streamable HTTP must allow initialize/list_tools without rejecting the connection;
+    tools validate the same API key as REST. Next.js rewrites also omit Authorization
+    unless the app proxies explicitly — use the forwarded header here.
+    """
+    try:
+        request = get_http_request()
+    except RuntimeError:
+        return None
+    auth = request.headers.get("authorization") or request.headers.get("Authorization")
+    if auth and auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return None
+
+
+def _mcp_owner_id(api_key: str | None) -> str:
+    """Resolve owner from optional tool arg or Authorization: Bearer (same as REST API key)."""
+    if api_key:
+        return api_key
+    bearer = _mcp_bearer_from_request()
+    if bearer:
+        return bearer
+    raise RuntimeError(
+        "Authentication required. Set Authorization: Bearer <API_SECRET_KEY> in MCP config (same key as the REST API)."
+    )
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):  # type: ignore[type-arg]
     global _worker_task
@@ -83,14 +135,24 @@ async def _lifespan(app: FastAPI):  # type: ignore[type-arg]
         _worker_task = None
 
 
+_worker_task: asyncio.Task[None] | None = None
+
+_mcp = FastMCP("TheCouncil")
+
+if hasattr(_mcp, "http_app"):
+    _mcp_app = _mcp.http_app(path="/")
+else:
+    streamable_http_app = getattr(_mcp, "streamable_http_app")
+    _mcp_app = streamable_http_app()
+
+# Mounted ASGI apps do not receive lifespan events; Streamable HTTP requires MCP lifespan
+# so the session manager task group starts (see fastmcp.utilities.lifespan.combine_lifespans).
 app = FastAPI(
     title="TheCouncil API",
     description="REST API for creating, queuing, and polling council debate runs.",
     version="0.1.0",
-    lifespan=_lifespan,
+    lifespan=combine_lifespans(_lifespan, _mcp_app.lifespan),
 )
-
-_mcp = FastMCP("TheCouncil")
 
 _cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if o.strip()]
 app.add_middleware(
@@ -101,22 +163,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-if hasattr(_mcp, "http_app"):
-    _mcp_app = _mcp.http_app(path="/")
-else:
-    streamable_http_app = getattr(_mcp, "streamable_http_app")
-    _mcp_app = streamable_http_app()
-
 app.mount("/mcp", _mcp_app)
-
-_worker_task: asyncio.Task[None] | None = None
 
 
 async def _run_worker_loop() -> None:
     while True:
         run_id = await run_queue.dequeue()
+        t0 = time.monotonic()
         try:
             run = await run_store.update_status(run_id, RunStatus.RUNNING)
+            await emit_run_event(run_id, "run_started", {"run_id": run_id})
             run_kind = str((run.config or {}).get("run_kind") or "council").strip().lower()
             if run_kind == "sandbox":
                 tier = _resolve_request_tier()
@@ -128,14 +184,33 @@ async def _run_worker_loop() -> None:
                     question=run.question,
                     config=run.config,
                     owner_id=run.owner_id,
+                    run_id=run_id,
                 )
             await run_store.update_status(run_id, RunStatus.COMPLETED, result=result)
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            await emit_run_event(
+                run_id,
+                "run_completed",
+                {
+                    "run_id": run_id,
+                    "winner": result.get("winner"),
+                    "final_resolution": result.get("final_resolution", ""),
+                    "elapsed_ms": elapsed_ms,
+                },
+            )
         except CouncilRunBlockedError as exc:
             await run_store.update_status(run_id, RunStatus.FAILED, error=str(exc))
+            await emit_run_event(run_id, "run_failed", {"run_id": run_id, "error": str(exc)})
         except SandboxDisabledError as exc:
             await run_store.update_status(run_id, RunStatus.FAILED, error=str(exc))
+            await emit_run_event(run_id, "run_failed", {"run_id": run_id, "error": str(exc)})
         except Exception as exc:
             await run_store.update_status(run_id, RunStatus.FAILED, error=f"{type(exc).__name__}: {exc}")
+            await emit_run_event(
+                run_id,
+                "run_failed",
+                {"run_id": run_id, "error": f"{type(exc).__name__}: {exc}"},
+            )
         finally:
             run_queue.task_done()
 
@@ -153,7 +228,7 @@ def _require_mcp_enabled(owner_id: str) -> None:
 @_mcp.tool()
 async def council_run(question: str, config: dict[str, Any] | None = None, api_key: str | None = None) -> dict[str, Any]:
     """Create and enqueue a council run. Returns the run_id and initial status."""
-    owner_id = api_key or ""
+    owner_id = _mcp_owner_id(api_key)
     _require_mcp_enabled(owner_id)
     run = await run_store.create(question=question, config=config or {}, owner_id=owner_id)
     await run_queue.enqueue(run.run_id)
@@ -163,7 +238,7 @@ async def council_run(question: str, config: dict[str, Any] | None = None, api_k
 @_mcp.tool()
 async def sandbox_run(question: str, config: dict[str, Any] | None = None, api_key: str | None = None) -> dict[str, Any]:
     """Create and enqueue an Ultra-only sandbox run."""
-    owner_id = api_key or ""
+    owner_id = _mcp_owner_id(api_key)
     _require_mcp_enabled(owner_id)
     tier = _resolve_request_tier()
     if not get_tier(tier).limits.computer_use_enabled:
@@ -178,7 +253,7 @@ async def sandbox_run(question: str, config: dict[str, Any] | None = None, api_k
 @_mcp.tool()
 async def council_poll(run_id: str, api_key: str | None = None) -> dict[str, Any]:
     """Poll a run created via council_run. Alias: council_status."""
-    owner_id = api_key or ""
+    owner_id = _mcp_owner_id(api_key)
     _require_mcp_enabled(owner_id)
     run = await run_store.get(run_id)
     if run.owner_id != owner_id:
@@ -207,7 +282,7 @@ async def council_artifact(run_id: str, format: str = "json", api_key: str | Non
       - dissenting_opinions: minority positions
       - top3_resolutions: ranked list of proposals
     """
-    owner_id = api_key or ""
+    owner_id = _mcp_owner_id(api_key)
     _require_mcp_enabled(owner_id)
 
     try:
@@ -332,17 +407,6 @@ def _build_artifact_from_result(run_id: str, question: str, result: dict[str, An
 # ---------------------------------------------------------------------------
 
 
-def _get_api_secret() -> str:
-    """Return the configured API secret key, raising if absent."""
-    secret = os.getenv("API_SECRET_KEY", "")
-    if not secret:
-        raise RuntimeError(
-            "API_SECRET_KEY environment variable is not set. "
-            "Set it before starting the server."
-        )
-    return secret
-
-
 async def require_auth(
     authorization: Annotated[str | None, Header()] = None,
 ) -> "AuthContext":
@@ -384,15 +448,6 @@ async def require_auth(
 class AuthContext:
     owner_id: str
     tier: TierName
-
-
-def _resolve_request_tier() -> TierName:
-    """Resolve caller tier from env for now; DB-backed mapping comes next."""
-    raw = os.getenv("DEFAULT_SUBSCRIPTION_TIER", TierName.BASIC.value).strip().lower()
-    try:
-        return TierName(raw)
-    except ValueError:
-        return TierName.BASIC
 
 
 def _count_runs_this_month(runs: list[Run]) -> int:
@@ -949,6 +1004,9 @@ async def _ws_broadcast(run_id: str, event: dict[str, Any]) -> None:
         _ws_connections.get(run_id, set()).discard(ws)
 
 
+register_ws_broadcast(_ws_broadcast)
+
+
 @app.websocket("/ws/{run_id}")
 async def run_websocket(websocket: WebSocket, run_id: str) -> None:
     """WebSocket endpoint for real-time deliberation event streaming.
@@ -957,8 +1015,9 @@ async def run_websocket(websocket: WebSocket, run_id: str) -> None:
       {"type": "run_started" | "agent_response" | "agent_dm" | "run_completed" | "run_failed",
        "run_id": "...", "ts": 1234567890.0, ...}
 
-    Authentication: pass token as query param ``?token=<bearer_token>``.
-    The connection is closed with code 4001 if the token is invalid.
+    Authentication: pass token as query param ``?token=<bearer_token>`` (same value as REST ``Authorization: Bearer``).
+
+    Close codes: 4000 server misconfig, 4001 invalid token, 4003 run not owned by token, 4004 run not found.
     """
     token = websocket.query_params.get("token", "")
     try:
@@ -971,6 +1030,16 @@ async def run_websocket(websocket: WebSocket, run_id: str) -> None:
         await websocket.close(code=4001)
         return
 
+    try:
+        run = await run_store.get(run_id)
+    except RunNotFoundError:
+        await websocket.close(code=4004)
+        return
+
+    if not run.owner_id or not secrets.compare_digest(run.owner_id, token):
+        await websocket.close(code=4003)
+        return
+
     await websocket.accept()
 
     if run_id not in _ws_connections:
@@ -978,50 +1047,29 @@ async def run_websocket(websocket: WebSocket, run_id: str) -> None:
     _ws_connections[run_id].add(websocket)
 
     try:
-        # Send current run state immediately so the client can bootstrap
-        try:
-            run = await run_store.get(run_id)
-            await websocket.send_text(json.dumps({
-                "type": "run_snapshot",
-                "run_id": run_id,
-                "status": run.status.value,
-                "result": run.result,
-                "error": run.error,
-                "ts": time.time(),
-            }, default=str))
-        except RunNotFoundError:
-            await websocket.send_text(json.dumps({
-                "type": "error",
-                "run_id": run_id,
-                "message": "Run not found.",
-                "ts": time.time(),
-            }))
-            return
+        await websocket.send_text(json.dumps({
+            "type": "run_snapshot",
+            "run_id": run_id,
+            "status": run.status.value,
+            "result": run.result,
+            "error": run.error,
+            "ts": time.time(),
+        }, default=str))
 
         # Stream events from Redis bus if available
         from council.bus.redis_bus import bus
         if hasattr(bus, "_redis"):
-            # Redis bus: tail the stream
             async for event in bus.read_run_events(run_id):
                 await websocket.send_text(json.dumps(event, default=str))
                 if event.get("type") in ("run_completed", "run_failed"):
                     break
         else:
-            # Null bus: poll the in-process run store until terminal state
-            while True:
-                try:
-                    run = await run_store.get(run_id)
-                except RunNotFoundError:
-                    break
-                if run.status in (RunStatus.COMPLETED, RunStatus.FAILED):
-                    await websocket.send_text(json.dumps({
-                        "type": "run_completed" if run.status is RunStatus.COMPLETED else "run_failed",
-                        "run_id": run_id,
-                        "status": run.status.value,
-                        "ts": time.time(),
-                    }, default=str))
-                    break
-                await asyncio.sleep(2)
+            # Null bus: live events are pushed via _ws_broadcast; keep socket open for client
+            try:
+                while True:
+                    await websocket.receive()
+            except WebSocketDisconnect:
+                pass
 
     except WebSocketDisconnect:
         pass

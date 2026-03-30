@@ -9,7 +9,9 @@ Architecture:
 
 Message types published to a run's event stream:
   run_started      — worker claimed the run
+  agents_announced — panel roster for UI bootstrap
   agent_response   — an agent produced a response in a debate round
+  agent_delta      — token chunk while streaming a cross-debate reply
   agent_dm         — private DM between two agents
   resolution_vote  — agent cast a vote for a resolution
   run_completed    — run finished successfully; includes artifact summary
@@ -121,7 +123,8 @@ class RedisBus:
     ) -> AsyncGenerator[dict[str, Any], None]:
         """Async generator that yields events from a run's stream since last_id.
 
-        Stops when the stream returns no new messages.
+        Blocking reads time out periodically with no rows; the loop continues
+        until a terminal event is yielded (run_completed / run_failed).
         """
         stream = _run_stream(run_id)
         current_id = last_id
@@ -135,7 +138,7 @@ class RedisBus:
                 break
 
             if not entries:
-                break
+                continue
 
             for _stream_name, messages in entries:
                 for msg_id, fields in messages:
@@ -147,7 +150,10 @@ class RedisBus:
                     except json.JSONDecodeError:
                         event["raw"] = raw_payload
                     event["ts"] = float(fields.get("ts", 0))
+                    event["run_id"] = fields.get("run_id", run_id)
                     yield event
+                    if event.get("type") in ("run_completed", "run_failed"):
+                        return
 
     async def enqueue_run(self, run_id: str) -> None:
         """Push a run_id onto the shared work queue stream."""

@@ -1,35 +1,110 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
+/* ── Design tokens ─────────────────────────────────────────────────────────── */
 :root {
-  --background: #09090b;
-  --foreground: #fafafa;
-  --muted: #a1a1aa;
-  --border-subtle: rgba(63, 63, 70, 0.55);
+  /* Surfaces */
+  --bg-base:    #070b0f;
+  --bg-surface: #0d1117;
+  --bg-overlay: #161c24;
+  --bg-raised:  #1c2430;
+
+  /* Borders */
+  --border-muted:  rgba(255, 255, 255, 0.06);
+  --border-subtle: rgba(255, 255, 255, 0.10);
+  --border-strong: rgba(255, 255, 255, 0.18);
+
+  /* Text */
+  --text-primary:   #f0f4f8;
+  --text-secondary: #8b9eb0;
+  --text-tertiary:  #4a5568;
+  --text-inverse:   #070b0f;
+
+  /* Accent — cyan/teal: tactical, technical */
+  --accent:         #06b6d4;
+  --accent-dim:     rgba(6, 182, 212, 0.12);
+  --accent-hover:   #22d3ee;
+  --accent-muted:   rgba(6, 182, 212, 0.25);
+
+  /* Status */
+  --status-success: #22c55e;
+  --status-warning: #f59e0b;
+  --status-danger:  #ef4444;
+  --status-info:    #3b82f6;
+
+  /* Legacy compat (used by body rule) */
+  --background: var(--bg-base);
+  --foreground: var(--text-primary);
+  --muted:      var(--text-secondary);
 }
 
-* {
+/* ── Base reset ─────────────────────────────────────────────────────────────── */
+*, *::before, *::after {
   box-sizing: border-box;
 }
 
-body {
-  background-color: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
+html {
+  color-scheme: dark;
 }
 
-/* Scrollbar */
+body {
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-sans, ui-sans-serif), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  min-height: 100vh;
+}
+
+/* ── Monospace utility ──────────────────────────────────────────────────────── */
+code, pre, kbd, .font-mono {
+  font-family: var(--font-mono, ui-monospace), "SFMono-Regular", Menlo, monospace;
+  font-variant-ligatures: none;
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #3f3f46;
+  background: rgba(255, 255, 255, 0.12);
   border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.20);
+}
+
+/* ── Selection ──────────────────────────────────────────────────────────────── */
+::selection {
+  background: rgba(6, 182, 212, 0.25);
+  color: #f0f4f8;
+}
+
+/* ── Focus ring ─────────────────────────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ── Grid overlay (subtle bg texture) ──────────────────────────────────────── */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.014) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.014) 1px, transparent 1px);
+  background-size: 32px 32px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── Smooth transitions ─────────────────────────────────────────────────────── */
+a, button {
+  transition-property: color, background-color, border-color, opacity, box-shadow;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 120ms;
 }
