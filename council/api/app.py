@@ -1007,6 +1007,33 @@ async def _ws_broadcast(run_id: str, event: dict[str, Any]) -> None:
 register_ws_broadcast(_ws_broadcast)
 
 
+@app.post("/internal/run-events", include_in_schema=False)
+async def internal_run_events(request: Request) -> JSONResponse:
+    """Receive deliberation events from an out-of-process worker (e.g. Celery) when Redis is off.
+
+    Same bearer token as the public API. Used only when ``COUNCIL_API_EVENT_BRIDGE_URL`` is set on the worker.
+    """
+    auth = request.headers.get("Authorization") or ""
+    if not auth.lower().startswith("bearer "):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+    token = auth[7:].strip()
+    try:
+        expected = _get_api_secret()
+    except RuntimeError:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Server misconfigured")
+    if not secrets.compare_digest(token, expected):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON")
+    run_id = body.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="run_id required")
+    await _ws_broadcast(run_id, body)
+    return JSONResponse(content={"received": True})
+
+
 @app.websocket("/ws/{run_id}")
 async def run_websocket(websocket: WebSocket, run_id: str) -> None:
     """WebSocket endpoint for real-time deliberation event streaming.

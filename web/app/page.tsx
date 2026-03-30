@@ -136,15 +136,15 @@ export default function LandingPage() {
             <h1 className="mb-5 text-4xl font-bold leading-[1.12] tracking-tight text-white sm:text-5xl">
               Your question,
               <br />
-              <span className="text-violet-400">five experts</span>,
+              <span className="text-violet-400">Multiple (configurable) experts</span>,
               <br />
               one rigorous answer.
             </h1>
 
             <p className="mb-8 text-base text-zinc-400 leading-relaxed max-w-lg">
               TheCouncil routes your question through a structured debate between
-              AI agents with distinct reasoning profiles. They argue, push back,
-              and synthesise — so you get answers that have been stress-tested,
+              AI agents with distinct reasoning profiles, configurable personas, and customizble tool calling capabilities. 
+              They argue, push back, and synthesise — so you get answers that have been stress-tested,
               not just generated.
             </p>
 

@@ -2,7 +2,7 @@
 
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Download } from "lucide-react";
 import { api, type Entitlements, type Run } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -43,6 +43,179 @@ function phaseLabel(phase: string): string {
   return labels[phase] ?? phase;
 }
 
+function phaseFromRoundNum(roundNum: number): string {
+  if (roundNum === 1) return "round1";
+  if (roundNum === 2) return "cross_debate_1";
+  if (roundNum === 4) return "cross_debate_2";
+  return "tiebreaker";
+}
+
+function feedsFromResult(result: Record<string, unknown>): Record<string, AgentFeed> {
+  const agents = result.agents as { name: string; role: string }[] | undefined;
+  const rounds = result.rounds as
+    | { round_num: number; responses: { agent: string; role: string; content: string }[] }[]
+    | undefined;
+  const next: Record<string, AgentFeed> = {};
+  if (agents?.length) {
+    for (const a of agents) {
+      next[a.name] = { role: a.role, sections: [], streamBuf: "" };
+    }
+  }
+  if (rounds) {
+    for (const round of rounds) {
+      const phase = phaseFromRoundNum(round.round_num);
+      for (const resp of round.responses) {
+        if (!next[resp.agent]) {
+          next[resp.agent] = { role: resp.role, sections: [], streamBuf: "" };
+        }
+        next[resp.agent].sections.push({ phase, content: resp.content });
+      }
+    }
+  }
+  return next;
+}
+
+function InlineMd({ text }: { text: string }) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return (
+    <>
+      {parts.map((part, i) => {
+        const m = /^\*\*([^*]+)\*\*$/.exec(part);
+        if (m) {
+          return (
+            <strong key={i} className="font-semibold text-zinc-100">
+              {m[1]}
+            </strong>
+          );
+        }
+        return <span key={i}>{part}</span>;
+      })}
+    </>
+  );
+}
+
+function RunOutcomePanel({ result }: { result: Record<string, unknown> }) {
+  const winner = typeof result.winner === "string" ? result.winner : "";
+  const finalResolution =
+    typeof result.final_resolution === "string" ? result.final_resolution : "";
+  const model = typeof result.model === "string" ? result.model : "";
+  const top3 = Array.isArray(result.top3) ? (result.top3 as Record<string, unknown>[]) : [];
+  const voteRounds = Array.isArray(result.vote_rounds) ? result.vote_rounds : [];
+  const resolutions =
+    result.resolutions && typeof result.resolutions === "object"
+      ? (result.resolutions as Record<string, string>)
+      : null;
+
+  return (
+    <div className="space-y-6">
+      {top3.length > 0 && (
+        <div>
+          <h3 className="mb-2 text-sm font-semibold text-zinc-300">Top proposals (moderator)</h3>
+          <ul className="space-y-4">
+            {top3.map((row, idx) => {
+              const rank = row.rank;
+              const agent = typeof row.agent === "string" ? row.agent : "";
+              const role = typeof row.role === "string" ? row.role : "";
+              const summary = typeof row.summary === "string" ? row.summary : "";
+              const resolution = typeof row.resolution === "string" ? row.resolution : "";
+              const pros = Array.isArray(row.pros) ? row.pros : [];
+              const cons = Array.isArray(row.cons) ? row.cons : [];
+              return (
+                <li
+                  key={`${agent}-${idx}`}
+                  className="rounded-lg border border-zinc-700/60 bg-zinc-950/50 p-4"
+                >
+                  <p className="text-xs text-violet-400/90">
+                    #{typeof rank === "number" ? rank : idx + 1} · {agent}
+                    {role ? <span className="text-zinc-500"> — {role}</span> : null}
+                  </p>
+                  {resolution ? (
+                    <p className="mt-2 text-sm text-zinc-200 whitespace-pre-wrap break-words">
+                      <InlineMd text={resolution} />
+                    </p>
+                  ) : null}
+                  {summary ? (
+                    <p className="mt-2 text-sm text-zinc-400 whitespace-pre-wrap break-words">
+                      <InlineMd text={summary} />
+                    </p>
+                  ) : null}
+                  {pros.length > 0 && (
+                    <div className="mt-2 text-xs text-zinc-500">
+                      <span className="text-emerald-500/90">Pros: </span>
+                      {(pros as string[]).join(" · ")}
+                    </div>
+                  )}
+                  {cons.length > 0 && (
+                    <div className="mt-2 text-xs text-zinc-500">
+                      <span className="text-amber-500/90">Cons: </span>
+                      {(cons as string[]).join(" · ")}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
+      {(winner || finalResolution) && (
+        <div className="rounded-lg border border-zinc-700/80 bg-zinc-900/40 p-4">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-emerald-400/90">Outcome</h3>
+          {winner ? (
+            <p className="mt-2 text-sm text-zinc-300">
+              <span className="font-medium text-zinc-300/90">With the intelligence of the entire council, the final resolution was prepared by: </span>
+              <span className="font-medium text-white">{winner}</span>
+            </p>
+          ) : null}
+          {finalResolution ? (
+            <div className="mt-3 text-sm leading-relaxed text-zinc-200">
+              <p className="text-xs text-zinc-500 mb-1">Consensus resolution</p>
+              <p className="whitespace-pre-wrap break-words">
+                <InlineMd text={finalResolution} />
+              </p>
+            </div>
+          ) : null}
+        </div>
+      )}
+
+      {model ? (
+        <p className="text-xs text-zinc-500">
+          Model: <span className="text-zinc-400">{model}</span>
+        </p>
+      ) : null}
+
+      {resolutions && Object.keys(resolutions).length > 0 && (
+        <details className="rounded-lg border border-zinc-800 bg-zinc-900/30 text-sm">
+          <summary className="cursor-pointer px-4 py-3 text-zinc-400">Agent resolutions</summary>
+          <ul className="space-y-2 border-t border-zinc-800 px-4 py-3 text-zinc-300">
+            {Object.entries(resolutions).map(([name, text]) => (
+              <li key={name}>
+                <span className="font-medium text-zinc-200">{name}: </span>
+                <span className="whitespace-pre-wrap break-words">{text}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      {voteRounds.length > 0 && (
+        <details className="rounded-lg border border-zinc-800 bg-zinc-900/30 text-sm">
+          <summary className="cursor-pointer px-4 py-3 text-zinc-400">Vote rounds</summary>
+          <ol className="list-decimal space-y-2 border-t border-zinc-800 px-4 py-3 pl-8 text-zinc-400">
+            {voteRounds.map((r, i) => (
+              <li key={i} className="font-mono text-xs">
+                {typeof r === "object" && r !== null
+                  ? JSON.stringify(r)
+                  : String(r)}
+              </li>
+            ))}
+          </ol>
+        </details>
+      )}
+    </div>
+  );
+}
+
 type WsEvent = {
   type: string;
   run_id?: string;
@@ -79,6 +252,7 @@ export default function RunDetailPage({
 }) {
   const { id } = use(params);
   const { token } = useAuth();
+  const queryClient = useQueryClient();
 
   const [feeds, setFeeds] = useState<Record<string, AgentFeed>>({});
   const [dmLog, setDmLog] = useState<string[]>([]);
@@ -98,8 +272,7 @@ export default function RunDetailPage({
     }
     if (msg.type === "agent_delta" && msg.agent && msg.delta) {
       setFeeds((prev) => {
-        const cur = prev[msg.agent!];
-        if (!cur) return prev;
+        const cur = prev[msg.agent!] ?? { role: "", sections: [], streamBuf: "" };
         return {
           ...prev,
           [msg.agent!]: { ...cur, streamBuf: cur.streamBuf + msg.delta! },
@@ -109,17 +282,20 @@ export default function RunDetailPage({
     }
     if (msg.type === "agent_response" && msg.agent && msg.content != null && msg.phase) {
       setFeeds((prev) => {
-        const cur = prev[msg.agent!];
-        if (!cur) return prev;
+        const cur = prev[msg.agent!] ?? {
+          role: typeof msg.role === "string" ? msg.role : "",
+          sections: [],
+          streamBuf: "",
+        };
+        const role =
+          typeof msg.role === "string" && msg.role ? msg.role : cur.role;
         return {
           ...prev,
           [msg.agent!]: {
             ...cur,
+            role,
             streamBuf: "",
-            sections: [
-              ...cur.sections,
-              { phase: msg.phase!, content: msg.content! },
-            ],
+            sections: [...cur.sections, { phase: msg.phase!, content: msg.content! }],
           },
         };
       });
@@ -160,6 +336,9 @@ export default function RunDetailPage({
     ws.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data as string) as WsEvent;
+        if (msg.type === "run_completed") {
+          void queryClient.invalidateQueries({ queryKey: ["run", id] });
+        }
         if (msg.type === "run_snapshot" && msg.result && typeof msg.result === "object") {
           const r = msg.result as { agents?: { name: string; role: string }[] };
           if (r.agents?.length && Object.keys(feedsRef.current).length === 0) {
@@ -179,7 +358,13 @@ export default function RunDetailPage({
     return () => {
       ws.close();
     };
-  }, [token, id, live, applyWsEvent]);
+  }, [token, id, live, applyWsEvent, queryClient]);
+
+  useEffect(() => {
+    if (!run.data || run.data.status !== "completed" || !run.data.result) return;
+    const res = run.data.result as Record<string, unknown>;
+    setFeeds(feedsFromResult(res));
+  }, [run.data?.status, run.data?.result]);
 
   function exportRun() {
     if (!run.data) return;
@@ -277,7 +462,7 @@ export default function RunDetailPage({
             <p className="text-sm text-zinc-300">
               {r.status === "pending"
                 ? "Run is queued — waiting for a worker…"
-                : "Live — agent outputs stream below as they speak."}
+                : "Running!"}
             </p>
           </CardContent>
         </Card>
@@ -302,7 +487,9 @@ export default function RunDetailPage({
                         <p className="mb-1 text-xs font-medium text-violet-400/90">
                           {phaseLabel(s.phase)}
                         </p>
-                        <p className="whitespace-pre-wrap break-words">{s.content}</p>
+                        <p className="whitespace-pre-wrap break-words">
+                          <InlineMd text={s.content} />
+                        </p>
                       </div>
                     ))}
                     {f.streamBuf ? (
@@ -311,7 +498,7 @@ export default function RunDetailPage({
                           Speaking…
                         </p>
                         <p className="whitespace-pre-wrap break-words text-zinc-200">
-                          {f.streamBuf}
+                          <InlineMd text={f.streamBuf} />
                         </p>
                       </div>
                     ) : null}
@@ -343,15 +530,13 @@ export default function RunDetailPage({
         </Card>
       )}
 
-      {r.result && (
+      {r.result && typeof r.result === "object" && (
         <Card>
           <CardHeader>
             <CardTitle>Result</CardTitle>
           </CardHeader>
           <CardContent>
-            <pre className="whitespace-pre-wrap break-words rounded-lg bg-zinc-800/50 p-4 text-sm text-zinc-200 font-mono overflow-x-auto">
-              {JSON.stringify(r.result, null, 2)}
-            </pre>
+            <RunOutcomePanel result={r.result as Record<string, unknown>} />
           </CardContent>
         </Card>
       )}
