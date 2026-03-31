@@ -8,7 +8,6 @@ Tests for new TheCouncil features:
   - Redis bus null fallback
 """
 
-import json
 import os
 import pytest
 import pytest_asyncio
@@ -72,7 +71,7 @@ async def completed_run(client):
             }
         ],
     }
-    run = await run_store.update_status(run_id, RunStatus.RUNNING)
+    await run_store.update_status(run_id, RunStatus.RUNNING)
     await run_store.update_status(run_id, RunStatus.COMPLETED, result=fake_result)
 
     return run_id

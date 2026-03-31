@@ -257,7 +257,9 @@ export default function RunDetailPage({
   const [feeds, setFeeds] = useState<Record<string, AgentFeed>>({});
   const [dmLog, setDmLog] = useState<string[]>([]);
   const feedsRef = useRef(feeds);
-  feedsRef.current = feeds;
+  useEffect(() => {
+    feedsRef.current = feeds;
+  }, [feeds]);
 
   const applyWsEvent = useCallback((msg: WsEvent) => {
     if (msg.type === "agents_announced" && msg.agents?.length) {
@@ -360,11 +362,12 @@ export default function RunDetailPage({
     };
   }, [token, id, live, applyWsEvent, queryClient]);
 
-  useEffect(() => {
-    if (!run.data || run.data.status !== "completed" || !run.data.result) return;
-    const res = run.data.result as Record<string, unknown>;
-    setFeeds(feedsFromResult(res));
-  }, [run.data?.status, run.data?.result]);
+  const displayFeeds = useMemo(() => {
+    if (run.data?.status === "completed" && run.data.result) {
+      return feedsFromResult(run.data.result as Record<string, unknown>);
+    }
+    return feeds;
+  }, [run.data?.status, run.data?.result, feeds]);
 
   function exportRun() {
     if (!run.data) return;
@@ -379,7 +382,7 @@ export default function RunDetailPage({
     URL.revokeObjectURL(url);
   }
 
-  const agentNames = useMemo(() => Object.keys(feeds).sort(), [feeds]);
+  const agentNames = useMemo(() => Object.keys(displayFeeds).sort(), [displayFeeds]);
 
   if (run.isLoading) {
     return (
@@ -473,7 +476,7 @@ export default function RunDetailPage({
           <h2 className="mb-3 text-sm font-semibold text-zinc-400">Agents</h2>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             {agentNames.map((name) => {
-              const f = feeds[name];
+              const f = displayFeeds[name];
               if (!f) return null;
               return (
                 <Card key={name} className="flex min-h-[200px] flex-col">
