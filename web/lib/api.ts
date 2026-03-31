@@ -110,9 +110,9 @@ async function request<T>(
       lastError = error instanceof Error ? error : new Error(String(error));
 
       // Don't retry on client errors
-      if (lastError instanceof Error && (lastError as any).status) {
-        const status = (lastError as any).status;
-        if (status >= 400 && status < 500) {
+      if (lastError instanceof Error) {
+        const status = (lastError as Error & { status?: number }).status;
+        if (typeof status === "number" && status >= 400 && status < 500) {
           throw lastError;
         }
       }

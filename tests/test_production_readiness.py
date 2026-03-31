@@ -150,7 +150,7 @@ class TestRateLimiting:
         """Create run endpoint has rate limiting."""
         monkeypatch.setenv("API_SECRET_KEY", "test-key")
         headers = {"Authorization": "Bearer test-key"}
-        
+
         # Try many requests rapidly (should hit limit or queue limit)
         responses = []
         for _ in range(5):
@@ -160,7 +160,7 @@ class TestRateLimiting:
                 headers=headers,
             )
             responses.append(response.status_code)
-        
+
         # At least one should be rate limited (429) or hit another limit
         # Status codes: 202 (accepted), 429 (rate limited), 500 (server error)
         assert any(s in [202, 429] for s in responses)

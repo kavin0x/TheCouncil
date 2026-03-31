@@ -25,6 +25,12 @@ select = ["E", "F", "W"]
 ignore = [
   "E501", # line length (legacy modules)
 ]
+# load_dotenv() must run before council imports in these entry modules
+[tool.ruff.lint.per-file-ignores]
+"council/cli/main.py" = ["E402"]
+"council/core/runner.py" = ["E402"]
+"council/db/session.py" = ["E402"]
+"council/worker/celery_app.py" = ["E402"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

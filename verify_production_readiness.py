@@ -87,15 +87,15 @@ def check_database_connectivity() -> bool:
         if engine is None:
             log.warning("Database not configured (DATABASE_URL not set)")
             return True  # Not required for local dev
-        
+
         # Test connection
         import asyncio
         from sqlalchemy.future import select
-        
+
         async def test():
             async with engine.begin() as conn:
                 await conn.execute(select(1))
-        
+
         asyncio.run(test())
         log.info("✓ Database connectivity verified")
         return True
@@ -136,7 +136,7 @@ def check_code_quality() -> bool:
     for code_dir in code_dirs:
         if not Path(code_dir).exists():
             continue
-        
+
         for py_file in Path(code_dir).rglob("*.py"):
             try:
                 content = py_file.read_text()
@@ -184,7 +184,8 @@ def check_logging_configuration() -> bool:
     log.info("Checking logging configuration...")
     try:
         from council.logging_config import configure_logging
-        # Should not raise
+
+        configure_logging()
         log.info("✓ Logging configuration available")
         return True
     except Exception as e:
@@ -238,7 +239,7 @@ def main() -> int:
     log.info("=" * 60)
     passed_count = sum(1 for v in results.values() if v)
     total_count = len(results)
-    
+
     for name, passed in results.items():
         status = "✓ PASS" if passed else "✗ FAIL"
         log.info(f"{status}: {name}")
