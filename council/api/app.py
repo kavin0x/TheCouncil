@@ -864,22 +864,114 @@ class PersonaRecord(BaseModel):
     description: str | None = None
     owner_id: str
     created_at: float
+    updated_at: float | None = None
+    is_prebuilt: bool = False
+    is_active: bool = True
+    mbti: str | None = None
+    job_role: str | None = None
+    source: str | None = None  # "agents.yaml" | "canned" | "mbti" | "questionnaire" | None
 
 
 _persona_store: dict[str, PersonaRecord] = {}
 
+# Per-owner council configuration: which agents, how many, how many rounds
+_council_config_store: dict[str, dict[str, Any]] = {}
+
+
+def _seed_prebuilt_personas(owner_id: str) -> None:
+    """Seed prebuilt personas from agents.yaml and canned templates for an owner."""
+    already_seeded = any(
+        p.owner_id == owner_id and p.is_prebuilt
+        for p in _persona_store.values()
+    )
+    if already_seeded:
+        return
+
+    now = time.time()
+
+    # Seed from agents.yaml
+    import yaml as _yaml
+    from pathlib import Path as _Path
+
+    agents_yaml_path = _Path(__file__).parent.parent / "agents.yaml"
+    if not agents_yaml_path.exists():
+        agents_yaml_path = _Path(__file__).parent.parent.parent / "agents.yaml"
+
+    if agents_yaml_path.exists():
+        with open(agents_yaml_path) as f:
+            config = _yaml.safe_load(f)
+        for agent in config.get("agents", []):
+            pid = str(uuid.uuid4())
+            _persona_store[pid] = PersonaRecord(
+                persona_id=pid,
+                name=agent["name"],
+                mode="prebuilt",
+                system_prompt=agent.get("system_prompt", ""),
+                description=agent.get("role", ""),
+                owner_id=owner_id,
+                created_at=now,
+                updated_at=now,
+                is_prebuilt=True,
+                is_active=True,
+                source="agents.yaml",
+            )
+
+    # Seed from canned personalities
+    from council.features.personalities import CANNED_PERSONALITIES
+
+    for canned in CANNED_PERSONALITIES:
+        pid = str(uuid.uuid4())
+        _persona_store[pid] = PersonaRecord(
+            persona_id=pid,
+            name=canned["name"],
+            mode="canned",
+            system_prompt=canned.get("system_prompt", ""),
+            description=canned.get("role", ""),
+            owner_id=owner_id,
+            created_at=now,
+            updated_at=now,
+            is_prebuilt=True,
+            is_active=True,
+            source="canned",
+        )
+
 
 class CreatePersonaRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
-    mode: str = Field(default="custom", description="canned | mbti | custom")
+    mode: str = Field(default="custom", description="canned | mbti | custom | prebuilt | questionnaire")
     system_prompt: str = Field(..., min_length=1, max_length=8000)
     description: str | None = None
+    mbti: str | None = None
+    job_role: str | None = None
+    is_active: bool = True
 
 
 class UpdatePersonaRequest(BaseModel):
     name: str | None = None
+    mode: str | None = None
     system_prompt: str | None = None
     description: str | None = None
+    mbti: str | None = None
+    job_role: str | None = None
+    is_active: bool | None = None
+
+
+class QuestionnaireRequest(BaseModel):
+    """Questionnaire answers submitted from the frontend to generate a persona via LLM."""
+    identity: dict[str, Any] = Field(..., description="Name, domain, experience, etc.")
+    cognition: dict[str, Any] = Field(..., description="Decision style, risk, pace")
+    communication: dict[str, Any] = Field(..., description="Tone, persuasion style")
+    values: dict[str, Any] = Field(..., description="Core values, non-negotiables")
+    knowledge: dict[str, Any] = Field(..., description="Deep topics, weak areas, goals")
+    branches: dict[str, Any] = Field(default_factory=dict, description="Conditional branch answers")
+
+
+class CouncilConfigRequest(BaseModel):
+    """User-configurable council run settings."""
+    num_agents: int | None = Field(None, ge=2, le=20)
+    num_rounds: int | None = Field(None, ge=1, le=12)
+    selected_persona_ids: list[str] | None = Field(None, description="Which personas to use as agents")
+    model: str | None = None
 
 
 def _get_owned_persona(persona_id: str, owner_id: str) -> PersonaRecord:
@@ -893,6 +985,7 @@ def _get_owned_persona(persona_id: str, owner_id: str) -> PersonaRecord:
 async def list_personas(
     auth: Annotated[AuthContext, Depends(require_auth)],
 ) -> list[dict[str, Any]]:
+    _seed_prebuilt_personas(auth.owner_id)
     owned = sorted(
         (p for p in _persona_store.values() if p.owner_id == auth.owner_id),
         key=lambda p: p.created_at,
@@ -911,7 +1004,10 @@ async def create_persona(
     auth: Annotated[AuthContext, Depends(require_auth)],
 ) -> dict[str, Any]:
     limits = get_tier(auth.tier).limits
-    owned_count = sum(1 for p in _persona_store.values() if p.owner_id == auth.owner_id)
+    owned_count = sum(
+        1 for p in _persona_store.values()
+        if p.owner_id == auth.owner_id and not p.is_prebuilt
+    )
     if limits.max_saved_personas is not None and owned_count >= limits.max_saved_personas:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -920,6 +1016,7 @@ async def create_persona(
                 f"for tier '{auth.tier.value}'. Upgrade to save more."
             ),
         )
+    now = time.time()
     persona = PersonaRecord(
         persona_id=str(uuid.uuid4()),
         name=body.name,
@@ -927,7 +1024,12 @@ async def create_persona(
         system_prompt=body.system_prompt,
         description=body.description,
         owner_id=auth.owner_id,
-        created_at=time.time(),
+        created_at=now,
+        updated_at=now,
+        is_prebuilt=False,
+        is_active=body.is_active,
+        mbti=body.mbti,
+        job_role=body.job_role,
     )
     _persona_store[persona.persona_id] = persona
     return persona.model_dump(exclude={"owner_id"})
@@ -949,9 +1051,9 @@ async def update_persona(
     auth: Annotated[AuthContext, Depends(require_auth)],
 ) -> dict[str, Any]:
     p = _get_owned_persona(persona_id, auth.owner_id)
-    updated = p.model_copy(
-        update={k: v for k, v in body.model_dump().items() if v is not None}
-    )
+    update_data = {k: v for k, v in body.model_dump().items() if v is not None}
+    update_data["updated_at"] = time.time()
+    updated = p.model_copy(update=update_data)
     _persona_store[persona_id] = updated
     return updated.model_dump(exclude={"owner_id"})
 
@@ -967,6 +1069,177 @@ async def delete_persona(
 ) -> None:
     _get_owned_persona(persona_id, auth.owner_id)
     del _persona_store[persona_id]
+
+
+# ---------------------------------------------------------------------------
+# Persona questionnaire — generate persona via LLM from structured answers
+# ---------------------------------------------------------------------------
+
+
+@app.post(
+    "/me/personas/questionnaire",
+    status_code=status.HTTP_201_CREATED,
+    summary="Generate a persona from questionnaire answers using LLM",
+)
+async def create_persona_from_questionnaire(
+    body: QuestionnaireRequest,
+    auth: Annotated[AuthContext, Depends(require_auth)],
+) -> dict[str, Any]:
+    limits = get_tier(auth.tier).limits
+    owned_count = sum(
+        1 for p in _persona_store.values()
+        if p.owner_id == auth.owner_id and not p.is_prebuilt
+    )
+    if limits.max_saved_personas is not None and owned_count >= limits.max_saved_personas:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                f"Persona limit ({limits.max_saved_personas}) reached "
+                f"for tier '{auth.tier.value}'. Upgrade to save more."
+            ),
+        )
+
+    questionnaire_payload = {
+        "identity": body.identity,
+        "cognition": body.cognition,
+        "communication": body.communication,
+        "values": body.values,
+        "knowledge": body.knowledge,
+        "branches": body.branches,
+    }
+
+    model_prompt = (
+        "You are building a comprehensive agent persona profile for a council debate system.\n"
+        "Return ONE JSON object only (no markdown) with this schema:\n"
+        "{\n"
+        '  "name": string,\n'
+        '  "system_prompt": string (a detailed 200-400 word system prompt for this persona),\n'
+        '  "description": string (one-line summary),\n'
+        '  "mbti_type": string|null,\n'
+        '  "traits": [string],\n'
+        '  "reasoning_style": string,\n'
+        '  "communication_tone": string\n'
+        "}\n\n"
+        "Rules:\n"
+        "- The system_prompt must be a rich, concrete persona instruction (200-400 words) that covers identity, "
+        "reasoning style, communication tone, agenda, debate behavior, and domain expertise.\n"
+        "- Synthesize from the questionnaire answers below: identity, cognition, communication style, values, knowledge, "
+        "and any conditional branch answers.\n"
+        "- The description should be a concise one-line summary of who this persona is.\n"
+        "- If MBTI is not provided, infer a likely type from the answers or set null.\n"
+        "- Keep tone and vocabulary aligned with the user's stated communication style.\n"
+        "- Ground all claims in the provided questionnaire data."
+    )
+
+    try:
+        from council.core.council import api_call, PROFILE_BUILDER_MODEL, _extract_json_object
+
+        input_msgs = [
+            {"role": "system", "content": model_prompt},
+            {"role": "user", "content": json.dumps(questionnaire_payload, ensure_ascii=True, indent=2)},
+        ]
+        raw = await api_call(input_msgs, max_tokens=2000, model=PROFILE_BUILDER_MODEL)
+        generated = _extract_json_object(raw)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Persona generation failed: {exc}",
+        )
+
+    now = time.time()
+    name = str(generated.get("name") or body.identity.get("name", "Generated Persona"))
+    system_prompt = str(generated.get("system_prompt", ""))
+    if not system_prompt:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="LLM did not return a valid system_prompt.",
+        )
+
+    persona = PersonaRecord(
+        persona_id=str(uuid.uuid4()),
+        name=name,
+        mode="questionnaire",
+        system_prompt=system_prompt,
+        description=str(generated.get("description", "")),
+        owner_id=auth.owner_id,
+        created_at=now,
+        updated_at=now,
+        is_prebuilt=False,
+        is_active=True,
+        mbti=generated.get("mbti_type"),
+        source="questionnaire",
+    )
+    _persona_store[persona.persona_id] = persona
+    return persona.model_dump(exclude={"owner_id"})
+
+
+# ---------------------------------------------------------------------------
+# Council configuration — configurable agents, rounds, and agent selection
+# ---------------------------------------------------------------------------
+
+
+@app.get("/me/config", summary="Get council run configuration")
+async def get_council_config(
+    auth: Annotated[AuthContext, Depends(require_auth)],
+) -> dict[str, Any]:
+    _seed_prebuilt_personas(auth.owner_id)
+    limits = get_tier(auth.tier).limits
+    config = _council_config_store.get(auth.owner_id, {})
+    return {
+        "num_agents": config.get("num_agents", limits.max_agents),
+        "num_rounds": config.get("num_rounds", 4),
+        "selected_persona_ids": config.get("selected_persona_ids", []),
+        "model": config.get("model"),
+        "limits": {
+            "max_agents": limits.max_agents,
+            "max_rounds": limits.max_rounds,
+        },
+    }
+
+
+@app.put("/me/config", summary="Update council run configuration")
+async def update_council_config(
+    body: CouncilConfigRequest,
+    auth: Annotated[AuthContext, Depends(require_auth)],
+) -> dict[str, Any]:
+    limits = get_tier(auth.tier).limits
+    config = _council_config_store.get(auth.owner_id, {})
+
+    if body.num_agents is not None:
+        if body.num_agents > limits.max_agents:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"num_agents={body.num_agents} exceeds tier limit ({limits.max_agents}).",
+            )
+        config["num_agents"] = body.num_agents
+
+    if body.num_rounds is not None:
+        if body.num_rounds > limits.max_rounds:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"num_rounds={body.num_rounds} exceeds tier limit ({limits.max_rounds}).",
+            )
+        config["num_rounds"] = body.num_rounds
+
+    if body.selected_persona_ids is not None:
+        for pid in body.selected_persona_ids:
+            _get_owned_persona(pid, auth.owner_id)
+        config["selected_persona_ids"] = body.selected_persona_ids
+
+    if body.model is not None:
+        config["model"] = body.model
+
+    _council_config_store[auth.owner_id] = config
+    return {
+        "num_agents": config.get("num_agents", limits.max_agents),
+        "num_rounds": config.get("num_rounds", 4),
+        "selected_persona_ids": config.get("selected_persona_ids", []),
+        "model": config.get("model"),
+        "limits": {
+            "max_agents": limits.max_agents,
+            "max_rounds": limits.max_rounds,
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
