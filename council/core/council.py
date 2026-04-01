@@ -2637,6 +2637,18 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    # Validate file path arguments to prevent path traversal
+    _allowed_extensions = {".yaml", ".yml", ".json"}
+    for _arg_name, _path_val in [("--config", args.config), ("--people", getattr(args, "people", None))]:
+        if _path_val is not None:
+            _resolved = Path(_path_val).resolve()
+            if _resolved.suffix.lower() not in _allowed_extensions:
+                parser.error(
+                    f"{_arg_name}: file must have a .yaml, .yml, or .json extension, got '{_resolved.suffix}'"
+                )
+            if not _resolved.exists():
+                parser.error(f"{_arg_name}: file not found: {_resolved}")
+
     # Resolve personality mode
     pmode: PersonalityMode | None = None
     if args.mode:

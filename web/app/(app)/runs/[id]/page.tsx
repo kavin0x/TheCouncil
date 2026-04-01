@@ -24,6 +24,8 @@ function wsUrlForRun(base: string, runId: string, token: string): string {
   const wsBase = trimmed.startsWith("https")
     ? trimmed.replace(/^https/, "wss")
     : trimmed.replace(/^http/, "ws");
+  // TODO: Security - move token to WebSocket subprotocol or post-connect auth message
+  // to avoid token appearing in server logs and browser history
   return `${wsBase}/ws/${encodeURIComponent(runId)}?token=${encodeURIComponent(token)}`;
 }
 

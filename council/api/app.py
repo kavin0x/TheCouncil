@@ -32,11 +32,14 @@ import asyncio
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
 import time
 import uuid
 from contextlib import asynccontextmanager
+
+logger = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
 
@@ -165,9 +168,19 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
 )
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):  # type: ignore[type-arg]
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    return response
 
 app.mount("/mcp", _mcp_app)
 
@@ -447,9 +460,10 @@ async def require_auth(
     try:
         expected = _get_api_secret()
     except RuntimeError as exc:
+        logger.error("API secret misconfiguration: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(exc),
+            detail="Server configuration error.",
         ) from exc
     if not secrets.compare_digest(token, expected):
         raise HTTPException(
@@ -735,9 +749,10 @@ async def get_sandbox_stream(
     try:
         stream_url = await get_desktop_sandbox_stream_url(run_id)
     except Exception as exc:
+        logger.error("Desktop sandbox stream failed for run %s: %s", run_id, exc, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Could not start Desktop sandbox: {exc}",
+            detail="Sandbox service unavailable. Please try again later.",
         )
 
     return {"stream_url": stream_url}
@@ -796,19 +811,15 @@ async def stripe_webhook(request: Request) -> JSONResponse:
     webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 
     if not webhook_secret:
-        # Accept without verification in local dev when secret is not configured.
-        # In production, STRIPE_WEBHOOK_SECRET must always be set.
-        import json as _json
+        raise RuntimeError(
+            "STRIPE_WEBHOOK_SECRET must be set. Webhook signature verification is required."
+        )
 
-        try:
-            event: dict[str, Any] = _json.loads(payload)
-        except Exception:
-            raise HTTPException(status_code=400, detail="Invalid JSON payload.")
-    else:
-        try:
-            event = parse_webhook_event(payload, sig_header, webhook_secret)
-        except (ValueError, ImportError) as exc:
-            raise HTTPException(status_code=400, detail=str(exc))
+    try:
+        event = parse_webhook_event(payload, sig_header, webhook_secret)
+    except (ValueError, ImportError) as exc:
+        logger.warning("Stripe webhook verification failed: %s", exc)
+        raise HTTPException(status_code=400, detail="Webhook verification failed.")
 
     event_type = event.get("type")
 
@@ -935,8 +946,9 @@ async def create_portal(
 
     try:
         import stripe as _stripe  # type: ignore[import]
-    except ImportError:
-        raise HTTPException(status_code=503, detail="Stripe SDK not installed.")
+    except ImportError as exc:
+        print("Stripe import failed in billing/portal endpoint (Perhaps not installed?)", exc)
+        raise HTTPException(status_code=503, detail="server side error (my bad, ill fix it)")
 
     session = _stripe.billing_portal.Session.create(
         customer=customer_id,
@@ -1235,9 +1247,10 @@ async def create_persona_from_questionnaire(
         raw = await api_call(input_msgs, max_tokens=2000, model=PROFILE_BUILDER_MODEL)
         generated = _extract_json_object(raw)
     except Exception as exc:
+        logger.error("Persona generation failed: %s", exc, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Persona generation failed: {exc}",
+            detail="Persona generation failed. Please try again later.",
         )
 
     now = time.time()
@@ -1412,6 +1425,10 @@ async def run_websocket(websocket: WebSocket, run_id: str) -> None:
     Authentication: pass token as query param ``?token=<bearer_token>`` (same value as REST ``Authorization: Bearer``).
 
     Close codes: 4000 server misconfig, 4001 invalid token, 4003 run not owned by token, 4004 run not found.
+
+    TODO: Security - move token to WebSocket subprotocol or post-connect auth message
+    to avoid token appearing in server logs and proxy access logs.
+    IMPORTANT: Never log ``token`` or ``websocket.query_params`` — they contain the bearer token.
     """
     token = websocket.query_params.get("token", "")
     try:

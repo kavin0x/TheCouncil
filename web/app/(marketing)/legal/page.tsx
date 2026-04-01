@@ -60,9 +60,10 @@ export default function LegalPage() {
               circumvent limits, will result in account suspension.
             </p>
             <p>
-              TheCouncil integrates with third-party AI providers (OpenAI) to
+              TheCouncil integrates with third-party AI providers to
               power council debates. Outputs are AI-generated and should not be
               relied upon as professional legal, medical, or financial advice.
+              In addition to this, your data may be stored by these providers as described in their policies.
             </p>
             <p className="italic text-zinc-600">
               Full Terms of Service — coming soon. This page is a placeholder.
