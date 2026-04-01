@@ -27,11 +27,42 @@ def _uses_redis_stream() -> bool:
     return hasattr(_bus, "_redis")
 
 
+import ipaddress
+import urllib.parse
+
+
+def _is_safe_event_bridge_url(url: str) -> bool:
+    """Validate the event bridge URL to prevent SSRF attacks."""
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception:
+        return False
+    if parsed.scheme != "https":
+        return False
+    hostname = parsed.hostname or ""
+    if not hostname:
+        return False
+    # Block localhost and loopback
+    if hostname in ("localhost", "127.0.0.1", "::1"):
+        return False
+    # Block private / link-local IP ranges
+    try:
+        addr = ipaddress.ip_address(hostname)
+        if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+            return False
+    except ValueError:
+        pass  # hostname is a domain name, not an IP — allow
+    return True
+
+
 async def _post_event_bridge(body: dict[str, Any]) -> None:
     """When events are emitted from a separate process (e.g. Celery) with no Redis, forward to the API."""
     url = os.getenv("COUNCIL_API_EVENT_BRIDGE_URL", "").strip()
     secret = os.getenv("API_SECRET_KEY", "").strip()
     if not url or not secret:
+        return
+    if not _is_safe_event_bridge_url(url):
+        log.warning("COUNCIL_API_EVENT_BRIDGE_URL rejected (failed SSRF validation): %s", url)
         return
     try:
         import httpx

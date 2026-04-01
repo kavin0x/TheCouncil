@@ -18,8 +18,8 @@ import {
 import { useRouter } from "next/navigation";
 
 function maskKey(key: string): string {
-  if (key.length <= 12) return "•".repeat(key.length);
-  return key.slice(0, 8) + "•".repeat(Math.max(0, key.length - 12)) + key.slice(-4);
+  if (key.length <= 8) return "•".repeat(key.length);
+  return key.slice(0, 4) + "•".repeat(Math.max(8, key.length - 4));
 }
 
 export default function SettingsPage() {

@@ -120,7 +120,8 @@ function CreateRunDialog({ entitlements }: { entitlements?: Entitlements }) {
         } catch (err) {
           // Sandbox may still be spinning up — close the dialog and let the user
           // navigate to the run detail page to retry.
-          console.warn("Sandbox stream URL unavailable:", err);
+          console.warn("Sandbox stream URL unavailable");
+          if (process.env.NODE_ENV === "development") console.error(err);
           setError("Run started, but the sandbox stream could not be fetched yet. Check the run status page.");
           qc.invalidateQueries({ queryKey: ["runs"] });
         }
@@ -133,9 +134,11 @@ function CreateRunDialog({ entitlements }: { entitlements?: Entitlements }) {
       if (err.status === 429) {
         setError("Monthly run limit reached. Upgrade your plan to continue.");
       } else if (err.status === 403) {
-        setError(err.message);
+        setError("You don't have permission to perform this action.");
+      } else if (err.status === 404) {
+        setError("Resource not found.");
       } else {
-        setError(err.message);
+        setError("An unexpected error occurred. Please try again.");
       }
     },
   });
@@ -191,6 +194,7 @@ function CreateRunDialog({ entitlements }: { entitlements?: Entitlements }) {
                   src={sandboxStreamUrl}
                   className="mt-2 h-64 w-full rounded border border-zinc-700"
                   title="E2B Desktop sandbox"
+                  sandbox="allow-scripts allow-same-origin allow-forms"
                 />
               </details>
               <div className="flex justify-end">

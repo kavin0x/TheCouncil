@@ -43,6 +43,18 @@ function statusBadge(status: string) {
   return <Badge variant={v}>{status}</Badge>;
 }
 
+function validateStripeUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return ["stripe.com", "checkout.stripe.com", "billing.stripe.com"].some(
+      (domain) =>
+        parsed.hostname === domain || parsed.hostname.endsWith("." + domain)
+    );
+  } catch {
+    return false;
+  }
+}
+
 export default function UsagePage() {
   const { token } = useAuth();
 
@@ -62,7 +74,13 @@ export default function UsagePage() {
 
   const portal = useMutation({
     mutationFn: () => api.createPortal(token!, window.location.href),
-    onSuccess: ({ url }) => window.location.assign(url),
+    onSuccess: ({ url }) => {
+      if (validateStripeUrl(url)) {
+        window.location.assign(url);
+      } else {
+        console.error("Invalid redirect URL from portal API");
+      }
+    },
   });
 
   const checkout = useMutation({
@@ -72,7 +90,13 @@ export default function UsagePage() {
         success_url: `${window.location.origin}/dashboard`,
         cancel_url: window.location.href,
       }),
-    onSuccess: ({ url }) => window.location.assign(url),
+    onSuccess: ({ url }) => {
+      if (validateStripeUrl(url)) {
+        window.location.assign(url);
+      } else {
+        console.error("Invalid redirect URL from checkout API");
+      }
+    },
   });
 
   const sandboxRun = useMutation({
