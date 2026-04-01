@@ -48,6 +48,7 @@ class UsageLimits:
     max_saved_personas: int | None
     ide_plugins_enabled: bool
     custom_mcp_enabled: bool
+    web_search_enabled: bool
     computer_use_enabled: bool
     cua_enabled: bool
     sso_enabled: bool
@@ -70,6 +71,7 @@ TIER_LIMITS: dict[TierName, UsageLimits] = {
         max_saved_personas=3,
         ide_plugins_enabled=True,
         custom_mcp_enabled=False,
+        web_search_enabled=False,
         computer_use_enabled=False,
         cua_enabled=False,
         sso_enabled=False,
@@ -90,6 +92,7 @@ TIER_LIMITS: dict[TierName, UsageLimits] = {
         max_saved_personas=1,
         ide_plugins_enabled=False,
         custom_mcp_enabled=False,
+        web_search_enabled=False,
         computer_use_enabled=False,
         cua_enabled=False,
         sso_enabled=False,
@@ -110,6 +113,7 @@ TIER_LIMITS: dict[TierName, UsageLimits] = {
         max_saved_personas=10,
         ide_plugins_enabled=True,
         custom_mcp_enabled=True,
+        web_search_enabled=True,
         computer_use_enabled=False,
         cua_enabled=False,
         sso_enabled=False,
@@ -130,6 +134,7 @@ TIER_LIMITS: dict[TierName, UsageLimits] = {
         max_saved_personas=None,
         ide_plugins_enabled=True,
         custom_mcp_enabled=True,
+        web_search_enabled=True,
         computer_use_enabled=True,
         cua_enabled=True,
         sso_enabled=False,
@@ -150,6 +155,7 @@ TIER_LIMITS: dict[TierName, UsageLimits] = {
         max_saved_personas=None,
         ide_plugins_enabled=True,
         custom_mcp_enabled=True,
+        web_search_enabled=True,
         computer_use_enabled=True,
         cua_enabled=True,
         sso_enabled=True,
@@ -272,7 +278,7 @@ def tier_allows_feature(tier_name: str | TierName, feature: str) -> bool:
 
     Supported feature keys:
       "mcp", "plugins", "api", "export", "history", "async_runs",
-      "ide_plugins", "custom_mcp", "computer_use", "cua", "sso",
+      "ide_plugins", "custom_mcp", "web_search", "computer_use", "cua", "sso",
       "centralized_billing", "personas_unlimited"
     """
     limits = get_tier(tier_name).limits
@@ -285,6 +291,7 @@ def tier_allows_feature(tier_name: str | TierName, feature: str) -> bool:
         "async_runs": limits.async_runs,
         "ide_plugins": limits.ide_plugins_enabled,
         "custom_mcp": limits.custom_mcp_enabled,
+        "web_search": limits.web_search_enabled,
         "computer_use": limits.computer_use_enabled,
         "cua": limits.cua_enabled,
         "sso": limits.sso_enabled,
