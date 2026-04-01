@@ -577,14 +577,31 @@ def _collect_attachments_interactive() -> dict[str, Any]:
 
 
 def _build_full_questionnaire() -> dict[str, Any]:
-    """Run complete branched interview and return a structured questionnaire payload."""
+    """Run complete branched interview and return a structured questionnaire payload.
+
+    The questionnaire covers five dimensions:
+      1. Identity & Background — who you are and what you bring
+      2. Cognition & Decision-Making — how you think and decide
+      3. Situational Responses — branching questions based on earlier answers
+      4. Communication & Values — how you interact and what you stand for
+      5. Knowledge & Goals — expertise, blind spots, and debate objectives
+      6. Metacognition — self-awareness about reasoning patterns
+    """
     console.print()
     console.print(
         Panel(
-            "[bold]Questionnaire[/]\n"
-            "[dim]This is a full profile interview. Some questions branch based on your answers.[/]",
+            "[bold]Persona Questionnaire[/]\n"
+            "[dim]This is a comprehensive profile interview with adaptive branching.\n"
+            "Your answers drive which follow-up questions appear.\n"
+            "Take your time — richer answers produce better personas.[/]",
             border_style="blue",
         )
+    )
+
+    # ── Section 1: Identity & Background ──
+    console.print()
+    console.print(
+        Panel("[bold cyan]Section 1: Identity & Background[/]", border_style="cyan")
     )
 
     name = _ask_text("Name: ")
@@ -611,6 +628,16 @@ def _build_full_questionnaire() -> dict[str, Any]:
         "Signature experiences/projects (comma separated, at least 2): ",
         minimum_items=2,
     )
+    professional_identity = _ask_multiline(
+        "In 2-3 sentences, how would a close colleague describe what makes you distinctive?",
+        min_chars=40,
+    )
+
+    # ── Section 2: Cognition & Decision-Making ──
+    console.print()
+    console.print(
+        Panel("[bold cyan]Section 2: Cognition & Decision-Making[/]", border_style="cyan")
+    )
 
     decision_style = _ask_choice(
         "Primary decision style",
@@ -627,8 +654,27 @@ def _build_full_questionnaire() -> dict[str, Any]:
         ["deliberate", "balanced", "fast"],
         default="balanced",
     )
+    information_preference = _ask_choice(
+        "When forming an opinion, you rely most on",
+        ["data-and-metrics", "expert-testimony", "personal-experience", "first-principles-reasoning", "pattern-matching"],
+        default="data-and-metrics",
+    )
+    disagreement_response = _ask_choice(
+        "When someone strongly disagrees with you, your first instinct is to",
+        ["ask-clarifying-questions", "defend-your-position", "seek-common-ground", "pause-and-reflect", "escalate-the-argument"],
+        default="ask-clarifying-questions",
+    )
+
+    # ── Section 3: Situational Responses (branching) ──
+    console.print()
+    console.print(
+        Panel("[bold cyan]Section 3: Situational Responses[/]\n"
+              "[dim]These questions adapt based on your earlier answers.[/]", border_style="cyan")
+    )
 
     branch_answers: dict[str, Any] = {}
+
+    # Risk branch
     if risk_tolerance == "high":
         branch_answers["risk_branch"] = {
             "failure_recovery": _ask_multiline(
@@ -636,6 +682,7 @@ def _build_full_questionnaire() -> dict[str, Any]:
                 min_chars=60,
             ),
             "acceptable_downside": _ask_text("What downside is acceptable for high-upside bets? "),
+            "biggest_bet": _ask_text("Describe the biggest risk you've taken professionally and the outcome: "),
         }
     elif risk_tolerance == "low":
         branch_answers["risk_branch"] = {
@@ -644,6 +691,7 @@ def _build_full_questionnaire() -> dict[str, Any]:
                 min_chars=60,
             ),
             "fallback_strategy": _ask_text("What fallback plans do you always prepare? "),
+            "missed_opportunity": _ask_text("Describe a time caution caused you to miss a good opportunity: "),
         }
     else:
         branch_answers["risk_branch"] = {
@@ -652,21 +700,27 @@ def _build_full_questionnaire() -> dict[str, Any]:
                 min_chars=60,
             ),
             "calibration_method": _ask_text("How do you calibrate confidence under uncertainty? "),
+            "balanced_example": _ask_text("Give an example of a decision where you balanced risk well: "),
         }
 
+    # Pace branch
     if pace_preference == "fast":
         branch_answers["pace_branch"] = {
             "guardrails": _ask_text("What guardrails prevent rushed mistakes? "),
+            "reversal_cost": _ask_text("How do you think about the cost of reversing a fast decision? "),
         }
     elif pace_preference == "deliberate":
         branch_answers["pace_branch"] = {
             "anti-analysis-paralysis": _ask_text("How do you avoid analysis paralysis? "),
+            "time_pressure": _ask_text("What happens to your decision quality under time pressure? "),
         }
     else:
         branch_answers["pace_branch"] = {
             "balance_strategy": _ask_text("How do you balance speed and depth in practice? "),
+            "context_switching": _ask_text("How do you decide which decisions need more time? "),
         }
 
+    # Leadership / IC branch
     leads_people = _ask_yes_no("Do you regularly lead teams or organizations?")
     if leads_people:
         branch_answers["leadership_branch"] = {
@@ -676,6 +730,7 @@ def _build_full_questionnaire() -> dict[str, Any]:
                 min_chars=60,
             ),
             "delegation": _ask_text("How do you delegate high-stakes work? "),
+            "team_blind_spots": _ask_text("What blind spots do teams develop under your leadership? "),
         }
     else:
         branch_answers["individual_contributor_branch"] = {
@@ -684,32 +739,45 @@ def _build_full_questionnaire() -> dict[str, Any]:
                 min_chars=60,
             ),
             "collaboration_pattern": _ask_text("How do you collaborate with leaders/stakeholders? "),
+            "pushback_approach": _ask_text("How do you push back when you disagree with a leader's direction? "),
         }
 
+    # Domain-specific branch
     domain_key = primary_domain.lower()
     if any(k in domain_key for k in ["engineer", "software", "ai", "ml", "data"]):
         branch_answers["domain_branch"] = {
             "architecture_bias": _ask_text("Preferred architecture bias (simple, modular, experimental, etc.): "),
             "debt_vs_speed": _ask_multiline("How do you trade off technical debt vs delivery speed?", min_chars=60),
             "reliability_principles": _ask_text("Top reliability principles you insist on: "),
+            "technology_evaluation": _ask_text("How do you evaluate new technologies vs proven ones? "),
         }
     elif any(k in domain_key for k in ["finance", "ops", "operations", "business"]):
         branch_answers["domain_branch"] = {
             "north_star_metric": _ask_text("Primary metric you trust most: "),
             "efficiency_tradeoffs": _ask_multiline("How do you balance growth vs efficiency?", min_chars=60),
             "resource_allocation": _ask_text("How do you allocate constrained resources? "),
+            "forecasting_approach": _ask_text("How do you approach forecasting and planning under uncertainty? "),
         }
     elif any(k in domain_key for k in ["policy", "regulation", "government", "legal"]):
         branch_answers["domain_branch"] = {
             "policy_frame": _ask_text("Policy framing lens you use most: "),
             "stakeholder_balance": _ask_multiline("How do you balance stakeholder interests under uncertainty?", min_chars=60),
             "compliance_vs_innovation": _ask_text("How do you handle compliance vs innovation tension? "),
+            "precedent_weight": _ask_text("How much weight do you give precedent vs novel approaches? "),
         }
     elif any(k in domain_key for k in ["research", "science", "academic"]):
         branch_answers["domain_branch"] = {
             "evidence_standard": _ask_text("Evidence standard for accepting claims: "),
             "hypothesis_strategy": _ask_multiline("How do you design and revise hypotheses?", min_chars=60),
             "reproducibility": _ask_text("How do you ensure reproducibility or rigor? "),
+            "paradigm_shifts": _ask_text("How do you respond when evidence contradicts established theory? "),
+        }
+    elif any(k in domain_key for k in ["design", "ux", "creative", "marketing"]):
+        branch_answers["domain_branch"] = {
+            "quality_principle": _ask_text("What principle defines high quality in your craft? "),
+            "creative_tradeoffs": _ask_multiline("How do you balance originality with execution constraints?", min_chars=60),
+            "feedback_model": _ask_text("How do you incorporate critical feedback? "),
+            "user_empathy": _ask_text("How do you stay connected to the end user's perspective? "),
         }
     else:
         branch_answers["domain_branch"] = {
@@ -717,6 +785,12 @@ def _build_full_questionnaire() -> dict[str, Any]:
             "creative_tradeoffs": _ask_multiline("How do you balance originality with execution constraints?", min_chars=60),
             "feedback_model": _ask_text("How do you incorporate critical feedback? "),
         }
+
+    # ── Section 4: Communication & Values ──
+    console.print()
+    console.print(
+        Panel("[bold cyan]Section 4: Communication & Values[/]", border_style="cyan")
+    )
 
     communication_tone = _ask_text("Communication tone (direct, diplomatic, energetic, etc.): ")
     communication_no_go = _ask_list(
@@ -742,6 +816,12 @@ def _build_full_questionnaire() -> dict[str, Any]:
         min_chars=60,
     )
 
+    # ── Section 5: Knowledge & Goals ──
+    console.print()
+    console.print(
+        Panel("[bold cyan]Section 5: Knowledge & Goals[/]", border_style="cyan")
+    )
+
     known_topics = _ask_list("Topics you know deeply (comma separated, at least 4): ", minimum_items=4)
     weak_topics = _ask_list(
         "Areas where you are weaker (optional, comma separated): ",
@@ -760,6 +840,35 @@ def _build_full_questionnaire() -> dict[str, Any]:
         allow_empty=True,
     )
 
+    # ── Section 6: Metacognition ──
+    console.print()
+    console.print(
+        Panel("[bold cyan]Section 6: Self-Awareness & Metacognition[/]\n"
+              "[dim]These questions help build a more nuanced persona that knows its own limits.[/]",
+              border_style="cyan")
+    )
+
+    known_biases = _ask_list(
+        "Cognitive biases you know you are susceptible to (comma separated, optional): ",
+        minimum_items=1,
+        allow_empty=True,
+    )
+    changed_mind = _ask_multiline(
+        "Describe something significant you changed your mind about and why:",
+        min_chars=40,
+        allow_empty=True,
+    )
+    intellectual_heroes = _ask_list(
+        "Thinkers, leaders, or frameworks that strongly influence your worldview (optional): ",
+        minimum_items=1,
+        allow_empty=True,
+    )
+    group_role = _ask_choice(
+        "In a group decision, you naturally gravitate toward being the",
+        ["initiator", "critic", "mediator", "executor", "observer"],
+        default="initiator",
+    )
+
     attachments = _collect_attachments_interactive()
 
     return {
@@ -774,12 +883,15 @@ def _build_full_questionnaire() -> dict[str, Any]:
             "secondary_domains": secondary_domains,
             "years_experience": years_experience,
             "signature_experiences": signature_experiences,
+            "professional_identity": professional_identity,
         },
         "cognition": {
             "decision_style": decision_style,
             "risk_tolerance": risk_tolerance,
             "pace_preference": pace_preference,
             "stress_response": stress_response,
+            "information_preference": information_preference,
+            "disagreement_response": disagreement_response,
         },
         "communication": {
             "tone": communication_tone,
@@ -798,6 +910,12 @@ def _build_full_questionnaire() -> dict[str, Any]:
             "contrarian_views": contrarian_views,
             "goals": debate_goals,
             "trigger_topics": trigger_topics,
+        },
+        "metacognition": {
+            "known_biases": known_biases,
+            "changed_mind": changed_mind,
+            "intellectual_heroes": intellectual_heroes,
+            "group_role": group_role,
         },
         "branches": branch_answers,
         "attachments": attachments,
@@ -901,11 +1019,11 @@ async def run_persona_questionnaire(output_path: Path) -> None:
           },
           "sources": {
             "links": [string],
-                        "files": [string],
-                        "manual_excerpts": [string]
-                    },
-                    "questionnaire": object,
-                    "attachment_summary": object
+            "files": [string],
+            "manual_excerpts": [string]
+          },
+          "questionnaire": object,
+          "attachment_summary": object
         }
 
         Rules:
@@ -913,10 +1031,18 @@ async def run_persona_questionnaire(output_path: Path) -> None:
         - "model" must be exactly "x-ai/grok-4-1-fast-non-reasoning".
         - "data" must be a rich, concrete textual profile (8-14 paragraphs) synthesizing identity,
           thinking style, expertise, communication, values, and notable evidence from attachments.
-                - Infer likely blind spots and debate failure modes from the questionnaire, not stereotypes.
-                - Keep tone and vocabulary aligned with the user's stated communication style.
+        - Infer likely blind spots and debate failure modes from the questionnaire, not stereotypes.
+        - Use the metacognition section (known biases, changed-mind examples, group role) to add
+          self-awareness and nuance to the persona — real people know their limitations.
+        - Keep tone and vocabulary aligned with the user's stated communication style.
+        - Integrate the professional identity description and domain-specific branch answers
+          to create a persona that sounds authentically like the person being modeled.
+        - debate_behaviors should reflect how this person actually argues (from their persuasion
+          style, disagreement response, and trigger topics), not generic debate tips.
+        - blind_spots should be inferred from their self-reported weak topics, known biases,
+          and any patterns visible in their branch answers.
         - Keep all claims grounded in the provided questionnaire and attachments.
-        - If MBTI not provided, set "mbti_type" to null.
+        - If MBTI not provided, infer the most likely type from answers or set "mbti_type" to null.
         """
     ).strip()
 

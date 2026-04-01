@@ -41,6 +41,62 @@ export interface Persona {
   system_prompt: string;
   description: string | null;
   created_at: number;
+  updated_at: number | null;
+  is_prebuilt: boolean;
+  is_active: boolean;
+  mbti: string | null;
+  job_role: string | null;
+  source: string | null;
+}
+
+export interface QuestionnairePayload {
+  identity: {
+    name: string;
+    alias?: string;
+    pronouns?: string;
+    location_context?: string;
+    primary_domain: string;
+    secondary_domains?: string[];
+    years_experience: string;
+    signature_experiences: string[];
+    mbti_type?: string;
+  };
+  cognition: {
+    decision_style: string;
+    risk_tolerance: string;
+    pace_preference: string;
+    stress_response: string;
+  };
+  communication: {
+    tone: string;
+    persuasion_style: string;
+    no_go_behaviors?: string[];
+    signature_phrases?: string[];
+  };
+  values: {
+    core_values: string[];
+    non_negotiables: string[];
+    ethical_boundaries: string;
+  };
+  knowledge: {
+    deep_topics: string[];
+    weak_topics?: string[];
+    contrarian_views?: string;
+    goals: string;
+    trigger_topics?: string[];
+  };
+  branches?: Record<string, Record<string, string>>;
+}
+
+export interface CouncilConfig {
+  num_agents: number;
+  num_rounds: number;
+  selected_persona_ids: string[];
+  model: string | null;
+  limits: {
+    max_agents: number;
+    max_rounds: number;
+  };
 }
 
 export interface Usage {
@@ -173,7 +229,15 @@ export const api = {
 
   createPersona: (
     token: string,
-    body: { name: string; mode: string; system_prompt: string; description?: string }
+    body: {
+      name: string;
+      mode: string;
+      system_prompt: string;
+      description?: string;
+      mbti?: string;
+      job_role?: string;
+      is_active?: boolean;
+    }
   ) =>
     request<Persona>("/me/personas", token, {
       method: "POST",
@@ -183,7 +247,15 @@ export const api = {
   updatePersona: (
     token: string,
     id: string,
-    body: { name?: string; system_prompt?: string; description?: string }
+    body: {
+      name?: string;
+      mode?: string;
+      system_prompt?: string;
+      description?: string;
+      mbti?: string;
+      job_role?: string;
+      is_active?: boolean;
+    }
   ) =>
     request<Persona>(`/me/personas/${id}`, token, {
       method: "PUT",
@@ -192,6 +264,32 @@ export const api = {
 
   deletePersona: (token: string, id: string) =>
     request<void>(`/me/personas/${id}`, token, { method: "DELETE" }),
+
+  createPersonaFromQuestionnaire: (
+    token: string,
+    body: QuestionnairePayload
+  ) =>
+    request<Persona>("/me/personas/questionnaire", token, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  getCouncilConfig: (token: string) =>
+    request<CouncilConfig>("/me/config", token),
+
+  updateCouncilConfig: (
+    token: string,
+    body: {
+      num_agents?: number;
+      num_rounds?: number;
+      selected_persona_ids?: string[];
+      model?: string;
+    }
+  ) =>
+    request<CouncilConfig>("/me/config", token, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
 
   health: () =>
     fetch(`${BASE}/health`).then((r) => r.json()) as Promise<{ status: string }>,
