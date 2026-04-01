@@ -239,6 +239,102 @@ class TestBuildArtifact:
 
 
 # ---------------------------------------------------------------------------
+# Web Search & Computer Use tier enforcement tests
+# ---------------------------------------------------------------------------
+
+
+class TestTierGatedFeatures:
+    @pytest.mark.asyncio
+    async def test_web_search_on_basic_tier_returns_403(self, monkeypatch):
+        """Basic tier cannot enable web search; server must reject with 403."""
+        monkeypatch.setenv("DEFAULT_SUBSCRIPTION_TIER", "basic")
+        import importlib, sys
+        if "council.api.app" in sys.modules:
+            importlib.reload(sys.modules["council.api.app"])
+        from council.api.app import app as api_app
+        async with AsyncClient(
+            transport=ASGITransport(app=api_app), base_url="http://testserver"
+        ) as c:
+            resp = await c.post(
+                "/runs",
+                json={"question": "Q?", "web_search_enabled": True},
+                headers=AUTH,
+            )
+        assert resp.status_code == 403
+        assert "pro" in resp.json()["detail"].lower()
+
+    @pytest.mark.asyncio
+    async def test_computer_use_on_pro_tier_returns_403(self, monkeypatch):
+        """Pro tier cannot enable computer use; server must reject with 403."""
+        monkeypatch.setenv("DEFAULT_SUBSCRIPTION_TIER", "pro")
+        import importlib, sys
+        if "council.api.app" in sys.modules:
+            importlib.reload(sys.modules["council.api.app"])
+        from council.api.app import app as api_app
+        async with AsyncClient(
+            transport=ASGITransport(app=api_app), base_url="http://testserver"
+        ) as c:
+            resp = await c.post(
+                "/runs",
+                json={"question": "Q?", "computer_use_enabled": True},
+                headers=AUTH,
+            )
+        assert resp.status_code == 403
+        assert "ultra" in resp.json()["detail"].lower()
+
+    @pytest.mark.asyncio
+    async def test_web_search_on_pro_tier_succeeds(self, monkeypatch):
+        """Pro tier can enable web search — the run should be created (202)."""
+        monkeypatch.setenv("DEFAULT_SUBSCRIPTION_TIER", "pro")
+        import importlib, sys
+        if "council.api.app" in sys.modules:
+            importlib.reload(sys.modules["council.api.app"])
+        from council.api.app import app as api_app
+        async with AsyncClient(
+            transport=ASGITransport(app=api_app), base_url="http://testserver"
+        ) as c:
+            resp = await c.post(
+                "/runs",
+                json={"question": "Search-enabled run?", "web_search_enabled": True},
+                headers=AUTH,
+            )
+        assert resp.status_code == 202
+        data = resp.json()
+        assert data["status"] == "pending"
+
+    @pytest.mark.asyncio
+    async def test_entitlements_includes_web_search_flag(self, monkeypatch):
+        """Entitlements response must include web_search_enabled for the current tier."""
+        monkeypatch.setenv("DEFAULT_SUBSCRIPTION_TIER", "pro")
+        import importlib, sys
+        if "council.api.app" in sys.modules:
+            importlib.reload(sys.modules["council.api.app"])
+        from council.api.app import app as api_app
+        async with AsyncClient(
+            transport=ASGITransport(app=api_app), base_url="http://testserver"
+        ) as c:
+            resp = await c.get("/me/entitlements", headers=AUTH)
+        assert resp.status_code == 200
+        features = resp.json()["features"]
+        assert "web_search_enabled" in features
+        assert features["web_search_enabled"] is True  # Pro has web search
+
+    @pytest.mark.asyncio
+    async def test_sandbox_stream_requires_ultra(self, monkeypatch):
+        """Basic tier trying to access sandbox stream must get 403."""
+        monkeypatch.setenv("DEFAULT_SUBSCRIPTION_TIER", "basic")
+        import importlib, sys
+        if "council.api.app" in sys.modules:
+            importlib.reload(sys.modules["council.api.app"])
+        from council.api.app import app as api_app
+        async with AsyncClient(
+            transport=ASGITransport(app=api_app), base_url="http://testserver"
+        ) as c:
+            resp = await c.get("/runs/fake-run-id/sandbox/stream", headers=AUTH)
+        assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
 # Anthropic provider utility tests
 # ---------------------------------------------------------------------------
 

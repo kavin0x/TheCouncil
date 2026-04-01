@@ -17,6 +17,7 @@ export interface Entitlements {
     mcp_enabled: boolean;
     custom_mcp_enabled: boolean;
     ide_plugins_enabled: boolean;
+    web_search_enabled: boolean;
     computer_use_enabled: boolean;
     sso_enabled: boolean;
     centralized_billing_enabled: boolean;
@@ -217,7 +218,12 @@ export const api = {
 
   createRun: (
     token: string,
-    body: { question: string; config?: Record<string, unknown> }
+    body: {
+      question: string;
+      config?: Record<string, unknown>;
+      web_search_enabled?: boolean;
+      computer_use_enabled?: boolean;
+    }
   ) =>
     request<Run>("/runs", token, {
       method: "POST",
@@ -293,4 +299,7 @@ export const api = {
 
   health: () =>
     fetch(`${BASE}/health`).then((r) => r.json()) as Promise<{ status: string }>,
+
+  getSandboxStream: (token: string, runId: string) =>
+    request<{ stream_url: string }>(`/runs/${runId}/sandbox/stream`, token),
 };

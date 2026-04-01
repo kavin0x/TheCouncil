@@ -108,6 +108,12 @@ def cmd_run(
     output_file: Optional[Path] = typer.Option(
         None, "--out", "-o", help="Write result JSON to this file."
     ),
+    web_search: bool = typer.Option(
+        False, "--web-search/--no-web-search", help="Enable web search for agents (Pro+ only)."
+    ),
+    computer_use: bool = typer.Option(
+        False, "--computer-use/--no-computer-use", help="Enable E2B Desktop sandbox for computer-use tasks (Ultra+ only)."
+    ),
 ) -> None:
     """Run a council debate on QUESTION.
 
@@ -115,8 +121,18 @@ def cmd_run(
     (requires [bold]COUNCIL_API_TOKEN[/] and optionally [bold]COUNCIL_API_URL[/]).
     """
     if api:
-        _run_via_api(question, mode, agents, rounds, wait, output_file)
+        _run_via_api(question, mode, agents, rounds, wait, output_file, web_search, computer_use)
     else:
+        if web_search:
+            console.print(
+                "[yellow]Note:[/] --web-search is only effective when using --api "
+                "(local runs do not contact the backend tier system)."
+            )
+        if computer_use:
+            console.print(
+                "[yellow]Note:[/] --computer-use is only effective when using --api "
+                "(local runs do not spawn E2B Desktop sandboxes)."
+            )
         _run_local(question, mode, agents, rounds, config_file, no_guardrails, output_file)
 
 
@@ -158,6 +174,8 @@ def _run_via_api(
     rounds: Optional[int],
     wait: bool,
     output_file: Optional[Path],
+    web_search: bool = False,
+    computer_use: bool = False,
 ) -> None:
     """Submit the debate to the Council API and optionally poll until done."""
     _require_api_token()
@@ -171,9 +189,19 @@ def _run_via_api(
     if rounds:
         config["num_rounds"] = rounds
 
+    body: dict = {"question": question, "config": config}
+    if web_search:
+        body["web_search_enabled"] = True
+    if computer_use:
+        body["computer_use_enabled"] = True
+
     with _get_api_client() as client:
         try:
-            resp = client.post("/runs", json={"question": question, "config": config})
+            resp = client.post("/runs", json=body)
+            if resp.status_code == 403:
+                detail = resp.json().get("detail", "Feature not available on your plan.")
+                console.print(f"[bold red]Error:[/] {detail}")
+                raise typer.Exit(1)
             resp.raise_for_status()
         except httpx.HTTPError as exc:
             console.print(f"[red]API error:[/] {exc}")
@@ -183,6 +211,20 @@ def _run_via_api(
         run_id = run["run_id"]
         console.print(f"[green]Run created:[/] {run_id}")
         console.print(f"Status: {run['status']}")
+
+        # Print the VNC stream URL so the user can open it in a browser.
+        if computer_use:
+            try:
+                stream_resp = client.get(f"/runs/{run_id}/sandbox/stream")
+                if stream_resp.status_code == 200:
+                    stream_url = stream_resp.json().get("stream_url", "")
+                    if stream_url:
+                        console.print(
+                            f"[bold cyan]Desktop sandbox stream:[/] {stream_url}\n"
+                            "[dim]Open the URL above in a browser to watch the sandbox live.[/]"
+                        )
+            except Exception as exc:
+                console.print(f"[yellow]Could not fetch sandbox stream URL:[/] {exc}")
 
         if not wait:
             if output_file:
