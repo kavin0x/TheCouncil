@@ -64,7 +64,13 @@ from council.models.state import (
     run_queue,
     run_store,
 )
-from council.features.sandbox import SandboxDisabledError, run_sandbox_task
+from council.features.sandbox import (
+    SandboxDisabledError,
+    get_desktop_sandbox_stream_url,
+    kill_desktop_sandbox,
+    run_sandbox_task,
+)
+from council.features.web_search import WebSearchDisabledError, web_search
 from council.models.subscriptions import (
     TierName,
     get_tier,
@@ -174,15 +180,22 @@ async def _run_worker_loop() -> None:
             run = await run_store.update_status(run_id, RunStatus.RUNNING)
             await emit_run_event(run_id, "run_started", {"run_id": run_id})
             run_kind = str((run.config or {}).get("run_kind") or "council").strip().lower()
+            cfg = run.config or {}
             if run_kind == "sandbox":
                 tier = _resolve_request_tier()
                 if not get_tier(tier).limits.computer_use_enabled:
                     raise SandboxDisabledError("Computer-use sandbox requires Ultra or Enterprise.")
                 result = await run_sandbox_task(question=run.question, config=run.config)
             else:
+                # Inject the web_search tool into the council run if enabled for this run.
+                # The tool spec is forwarded via config and consumed by the runner.
+                if cfg.get("web_search_enabled"):
+                    cfg = dict(cfg)
+                    cfg["_tools"] = cfg.get("_tools", []) + ["web_search"]
+
                 result = await run_council_for_api(
                     question=run.question,
-                    config=run.config,
+                    config=cfg,
                     owner_id=run.owner_id,
                     run_id=run_id,
                 )
@@ -212,6 +225,9 @@ async def _run_worker_loop() -> None:
                 {"run_id": run_id, "error": f"{type(exc).__name__}: {exc}"},
             )
         finally:
+            # Kill the Desktop sandbox associated with this run when the run ends.
+            if (run.config or {}).get("computer_use_enabled"):
+                await kill_desktop_sandbox(run_id)
             run_queue.task_done()
 
 
@@ -450,6 +466,24 @@ class AuthContext:
     tier: TierName
 
 
+def require_tier(auth: AuthContext, minimum: TierName) -> None:
+    """Raise HTTP 403 if the authenticated user's tier is below *minimum*.
+
+    Tier order: trial < basic < pro < ultra < enterprise.
+    """
+    from council.models.subscriptions import TIER_ORDER
+    current_idx = TIER_ORDER.index(auth.tier)
+    minimum_idx = TIER_ORDER.index(minimum)
+    if current_idx < minimum_idx:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                f"Your current plan ('{auth.tier.value}') does not include this feature. "
+                f"Upgrade to '{minimum.value}' or higher to unlock it."
+            ),
+        )
+
+
 def _count_runs_this_month(runs: list[Run]) -> int:
     now = datetime.now(timezone.utc)
     count = 0
@@ -470,6 +504,14 @@ class CreateRunRequest(BaseModel):
     config: dict[str, Any] = Field(
         default_factory=dict,
         description="Optional run configuration forwarded to DebateSession.",
+    )
+    web_search_enabled: bool = Field(
+        default=False,
+        description="Allow agents to call web search during deliberation (Pro+ only).",
+    )
+    computer_use_enabled: bool = Field(
+        default=False,
+        description="Spawn an E2B Desktop sandbox for computer-use tasks (Ultra+ only).",
     )
 
 
@@ -553,9 +595,21 @@ async def create_run(
             ),
         )
 
+    # Enforce tier gates for optional features — server-side regardless of client input.
+    if body.web_search_enabled:
+        require_tier(auth, TierName.PRO)
+
+    if body.computer_use_enabled:
+        require_tier(auth, TierName.ULTRA)
+
+    # Persist feature flags in the run config so the worker can read them.
+    run_config = dict(body.config)
+    run_config["web_search_enabled"] = body.web_search_enabled
+    run_config["computer_use_enabled"] = body.computer_use_enabled
+
     run = await run_store.create(
         question=body.question,
-        config=body.config,
+        config=run_config,
         owner_id=auth.owner_id,
     )
     await run_queue.enqueue(run.run_id)
@@ -651,6 +705,45 @@ async def get_run_artifact(
 
 
 @app.get(
+    "/runs/{run_id}/sandbox/stream",
+    summary="Get the E2B Desktop VNC stream URL for a computer-use run",
+)
+async def get_sandbox_stream(
+    run_id: str,
+    auth: Annotated[AuthContext, Depends(require_auth)],
+) -> dict[str, Any]:
+    """Return the VNC stream URL for the Desktop sandbox attached to this run.
+
+    The sandbox is created on demand if it does not yet exist.
+    Requires Ultra or Enterprise tier and ``computer_use_enabled=true`` on the run.
+    """
+    require_tier(auth, TierName.ULTRA)
+
+    try:
+        run = await run_store.get(run_id)
+    except RunNotFoundError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found.")
+    if run.owner_id != auth.owner_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found.")
+
+    if not (run.config or {}).get("computer_use_enabled"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Computer-use sandbox is not enabled for this run.",
+        )
+
+    try:
+        stream_url = await get_desktop_sandbox_stream_url(run_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Could not start Desktop sandbox: {exc}",
+        )
+
+    return {"stream_url": stream_url}
+
+
+@app.get(
     "/me/entitlements",
     summary="Get current subscription tier and limits",
 )
@@ -673,6 +766,7 @@ async def get_entitlements(
             "mcp_enabled": tier.limits.mcp_enabled,
             "custom_mcp_enabled": tier.limits.custom_mcp_enabled,
             "ide_plugins_enabled": tier.limits.ide_plugins_enabled,
+            "web_search_enabled": tier.limits.web_search_enabled,
             "computer_use_enabled": tier.limits.computer_use_enabled,
             "sso_enabled": tier.limits.sso_enabled,
             "centralized_billing_enabled": tier.limits.centralized_billing_enabled,
