@@ -605,7 +605,7 @@ export default function LegalPage() {
 
       {/* Mobile tab strip (visible below lg) */}
       <div className="sticky top-14 z-30 border-b border-zinc-800/60 bg-[#070b0f]/95 backdrop-blur-md lg:hidden">
-        <nav className="mx-auto flex max-w-6xl gap-1 overflow-x-auto px-4 py-2 scrollbar-none">
+        <nav className="mx-auto flex max-w-6xl gap-1 overflow-x-auto px-4 py-2 scrollbar-none" style={{ scrollbarWidth: "none" }}>
           {NAV_ITEMS.map(({ id, label }) => (
             <a
               key={id}
@@ -633,9 +633,9 @@ export default function LegalPage() {
                   <a
                     key={id}
                     href={`#${id}`}
-                    className="group flex items-center gap-2 rounded-md px-3 py-2 text-sm text-zinc-500 transition-colors hover:bg-zinc-800/60 hover:text-white"
+                    className="group flex items-center gap-2 rounded-md border-l-2 border-transparent py-2 pl-3 pr-3 text-sm text-zinc-500 transition-colors hover:border-violet-500/60 hover:bg-zinc-800/60 hover:text-white"
                   >
-                    <span className="h-1 w-1 rounded-full bg-zinc-700 transition-colors group-hover:bg-violet-500" />
+                    <span className="h-1 w-1 rounded-full bg-zinc-700 transition-colors group-hover:bg-violet-400" />
                     {label}
                   </a>
                 ))}

@@ -82,7 +82,9 @@ export default function IntegrationsPage() {
   if (!mcpEnabled && !ent.isLoading) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center">
-        <Lock className="mb-4 h-10 w-10 text-zinc-600" />
+        <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-xl bg-zinc-800 ring-1 ring-zinc-700/60">
+          <Lock className="h-6 w-6 text-zinc-500" />
+        </div>
         <h1 className="mb-2 text-xl font-bold text-white">Integrations require Pro</h1>
         <p className="mb-6 max-w-sm text-sm text-zinc-400">
           MCP server access and IDE plugin integrations are available on Pro, Ultra, and Enterprise plans.
@@ -258,10 +260,13 @@ ${JSON.stringify(
           </CardContent>
         </Card>
       ) : (
-        <Card className="opacity-60">
+        <Card className="opacity-50">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              Custom MCP registration <Lock className="h-4 w-4 text-zinc-500" />
+              Custom MCP registration
+              <span className="inline-flex items-center gap-1 rounded-md bg-zinc-800 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500 ring-1 ring-zinc-700/50">
+                <Lock className="h-2.5 w-2.5" /> Pro+
+              </span>
             </CardTitle>
             <CardDescription>Available on Pro and above.</CardDescription>
           </CardHeader>
