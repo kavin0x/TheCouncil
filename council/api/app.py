@@ -16,6 +16,8 @@ Endpoints:
   PUT  /me/personas/{id}   Update a persona
   DELETE /me/personas/{id} Delete a persona
   POST /webhooks/stripe    Handle Stripe Payment Links subscription lifecycle events
+  POST /api/legal/accept   Record ToS acceptance (version + timestamp)
+  GET  /api/legal/status   Check whether current ToS has been accepted
 
 Auth:
   Bearer token in the Authorization header.
@@ -180,6 +182,67 @@ async def add_security_headers(request: Request, call_next):  # type: ignore[typ
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     response.headers["X-XSS-Protection"] = "1; mode=block"
+    return response
+
+
+@app.middleware("http")
+async def add_rate_limit_headers(request: Request, call_next):  # type: ignore[type-arg]
+    """Inject X-RateLimit-* headers on responses from run-creation and persona-creation endpoints.
+
+    The limit values are derived from the caller's subscription tier when the
+    Authorization header is present.  On unauthenticated requests the middleware
+    is a no-op so that 401 responses are unaffected.
+
+    Headers set:
+      X-RateLimit-Limit     — max runs allowed this calendar month for the tier
+      X-RateLimit-Remaining — runs remaining this month (clamped to 0)
+      X-RateLimit-Reset     — Unix timestamp (int) of the start of next calendar month (UTC)
+    """
+    # Only annotate rate-limited endpoints; skip everything else for performance.
+    rate_limited_paths = {"/runs", "/me/personas", "/me/personas/questionnaire"}
+    if request.method not in ("POST",) or request.url.path not in rate_limited_paths:
+        return await call_next(request)
+
+    auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
+    if not auth_header or not auth_header.lower().startswith("bearer "):
+        return await call_next(request)
+
+    response = await call_next(request)
+
+    # Resolve tier and usage counts — best-effort; never block the response.
+    try:
+        token = auth_header[7:].strip()
+        try:
+            api_secret = _get_api_secret()
+        except RuntimeError:
+            return response
+        if not secrets.compare_digest(token, api_secret):
+            return response
+
+        tier = _resolve_request_tier()
+        limits = get_tier(tier).limits
+        runs_limit = limits.runs_per_month
+
+        # Count runs this month for the caller.  owner_id == token in dev/single-key mode.
+        all_runs = await run_store.list_runs(owner_id=token)
+        used = _count_runs_this_month(all_runs)
+        remaining = max(0, runs_limit - used)
+
+        # Reset timestamp: start of next calendar month UTC.
+        now_utc = datetime.now(timezone.utc)
+        if now_utc.month == 12:
+            reset_dt = datetime(now_utc.year + 1, 1, 1, tzinfo=timezone.utc)
+        else:
+            reset_dt = datetime(now_utc.year, now_utc.month + 1, 1, tzinfo=timezone.utc)
+        reset_ts = int(reset_dt.timestamp())
+
+        response.headers["X-RateLimit-Limit"] = str(runs_limit)
+        response.headers["X-RateLimit-Remaining"] = str(remaining)
+        response.headers["X-RateLimit-Reset"] = str(reset_ts)
+    except Exception:
+        # Never let header injection break a successful response.
+        pass
+
     return response
 
 app.mount("/mcp", _mcp_app)
@@ -1346,6 +1409,96 @@ async def update_council_config(
             "max_agents": limits.max_agents,
             "max_rounds": limits.max_rounds,
         },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Legal — Terms of Service acceptance
+# ---------------------------------------------------------------------------
+
+# In-memory ToS acceptance store: owner_id -> {"accepted_at": float, "version": str}
+# In production this should be backed by the users table (tos_accepted_at / tos_version columns).
+_tos_store: dict[str, dict[str, str | float]] = {}
+
+# The canonical current ToS version string.  Bump this date when the ToS is updated
+# so that users who previously accepted are required to re-accept.
+CURRENT_TOS_VERSION = "2026-04-01"
+
+
+class AcceptTosRequest(BaseModel):
+    """Body for POST /api/legal/accept."""
+
+    version: str = Field(
+        default=CURRENT_TOS_VERSION,
+        description="Version string of the ToS being accepted (e.g. '2026-04-01').",
+    )
+
+
+@app.post(
+    "/api/legal/accept",
+    status_code=status.HTTP_200_OK,
+    summary="Record acceptance of the Terms of Service",
+    tags=["legal"],
+)
+async def accept_tos(
+    body: AcceptTosRequest,
+    auth: Annotated[AuthContext, Depends(require_auth)],
+) -> dict[str, str | float | None]:
+    """Record that the authenticated user has accepted the Terms of Service.
+
+    Stores the acceptance timestamp and the version string they agreed to.
+    Subsequent calls overwrite the previous record (re-acceptance on version bump).
+
+    Returns the stored acceptance record.
+    """
+    if body.version != CURRENT_TOS_VERSION:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unknown ToS version '{body.version}'. Current version is '{CURRENT_TOS_VERSION}'.",
+        )
+    accepted_at = time.time()
+    _tos_store[auth.owner_id] = {
+        "owner_id": auth.owner_id,
+        "version": body.version,
+        "accepted_at": accepted_at,
+    }
+    return {
+        "tos_accepted": True,
+        "version": body.version,
+        "accepted_at": accepted_at,
+    }
+
+
+@app.get(
+    "/api/legal/status",
+    status_code=status.HTTP_200_OK,
+    summary="Check current Terms of Service acceptance status",
+    tags=["legal"],
+)
+async def get_tos_status(
+    auth: Annotated[AuthContext, Depends(require_auth)],
+) -> dict[str, str | float | bool | None]:
+    """Return whether the authenticated user has accepted the current ToS.
+
+    ``tos_accepted`` is ``True`` only when the stored version matches
+    ``CURRENT_TOS_VERSION``.  If the ToS has been updated since last acceptance
+    ``tos_accepted`` will be ``False`` and ``current_version`` indicates what
+    must be accepted.
+    """
+    record = _tos_store.get(auth.owner_id)
+    if record is None:
+        return {
+            "tos_accepted": False,
+            "current_version": CURRENT_TOS_VERSION,
+            "accepted_version": None,
+            "accepted_at": None,
+        }
+    accepted_version = str(record.get("version", ""))
+    return {
+        "tos_accepted": accepted_version == CURRENT_TOS_VERSION,
+        "current_version": CURRENT_TOS_VERSION,
+        "accepted_version": accepted_version,
+        "accepted_at": record.get("accepted_at"),
     }
 
 

@@ -19,6 +19,9 @@ def upgrade() -> None:
         sa.Column("email", sa.String(255), unique=True, nullable=False, index=True),
         sa.Column("created_at", sa.Float, nullable=False),
         sa.Column("tier", sa.String(32), default="basic", nullable=False),
+        # Terms-of-service acceptance tracking
+        sa.Column("tos_accepted_at", sa.Float, nullable=True),
+        sa.Column("tos_version", sa.String(32), nullable=True),
     )
 
     # API Keys for user authentication

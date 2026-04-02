@@ -22,7 +22,7 @@ export default function LoginPage() {
     setLoading(true);
     setError("");
     try {
-      await api.health();
+      await api.getEntitlements(key.trim());
       login(key.trim());
       router.push("/dashboard");
     } catch {
@@ -85,6 +85,18 @@ export default function LoginPage() {
             </Link>
           </p>
         </div>
+
+        <p className="mt-6 text-center text-xs text-zinc-700">
+          By signing in you agree to our{" "}
+          <Link href="/legal#tos" className="hover:text-zinc-500 underline underline-offset-2">
+            Terms of Service
+          </Link>{" "}
+          and{" "}
+          <Link href="/legal#privacy" className="hover:text-zinc-500 underline underline-offset-2">
+            Privacy Policy
+          </Link>
+          .
+        </p>
       </div>
     </div>
   );

@@ -209,6 +209,28 @@ export default function PricingPage() {
           Enterprise plan.
         </p>
       </div>
+
+      {/* Footer */}
+      <footer className="mt-20 border-t border-zinc-800/60 py-6">
+        <div className="mx-auto max-w-7xl px-6">
+          <div className="flex items-center justify-between">
+            <span className="font-mono text-xs text-zinc-700">
+              © {new Date().getFullYear()} TheCouncil
+            </span>
+            <div className="flex items-center gap-5 text-xs text-zinc-600">
+              <Link href="/legal#privacy" className="hover:text-zinc-400 transition-colors">
+                Privacy
+              </Link>
+              <Link href="/legal#tos" className="hover:text-zinc-400 transition-colors">
+                Terms
+              </Link>
+              <Link href="/legal#usage" className="hover:text-zinc-400 transition-colors">
+                Usage Limits
+              </Link>
+            </div>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }
