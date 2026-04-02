@@ -102,7 +102,7 @@ export default function DashboardPage() {
                   <span className="text-zinc-400">
                     {runsUsed} of {runsLimit} used
                   </span>
-                  <span className={pct >= 90 ? "text-red-400" : "text-zinc-400"}>
+                  <span className={pct >= 90 ? "text-red-400" : "text-zinc-500"}>
                     {pct}%
                   </span>
                 </div>
@@ -142,16 +142,16 @@ export default function DashboardPage() {
                 return (
                   <div
                     key={key}
-                    className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium ${
+                    className={`flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium ring-1 ${
                       enabled
-                        ? "bg-emerald-600/15 text-emerald-300"
-                        : "bg-zinc-800 text-zinc-500"
+                        ? "bg-emerald-600/10 text-emerald-300 ring-emerald-500/20"
+                        : "bg-zinc-800/80 text-zinc-600 ring-zinc-700/50"
                     }`}
                   >
                     {enabled ? (
-                      <Zap className="h-3 w-3" />
+                      <Zap className="h-3 w-3 shrink-0" />
                     ) : (
-                      <span className="h-3 w-3 rounded-full border border-zinc-600 inline-block" />
+                      <span className="inline-block h-2.5 w-2.5 rounded-full border border-zinc-700" />
                     )}
                     {label}
                   </div>
@@ -184,7 +184,7 @@ export default function DashboardPage() {
             </div>
           ) : runs.data?.length === 0 ? (
             <div className="py-8 text-center">
-              <Bot className="mx-auto mb-3 h-8 w-8 text-zinc-600" />
+              <Bot className="mx-auto mb-3 h-8 w-8 text-zinc-700 opacity-60" />
               <p className="text-sm text-zinc-500">No runs yet.</p>
               <Link href="/runs" className="mt-3 inline-block">
                 <Button size="sm" variant="secondary" className="gap-2">
@@ -193,18 +193,18 @@ export default function DashboardPage() {
               </Link>
             </div>
           ) : (
-            <div className="divide-y divide-zinc-800">
+            <div className="divide-y divide-zinc-800/60">
               {runs.data?.map((run) => (
                 <Link
                   key={run.run_id}
                   href={`/runs/${run.run_id}`}
-                  className="flex items-start gap-3 py-3 hover:bg-zinc-800/30 -mx-5 px-5 transition-colors rounded-lg"
+                  className="group -mx-5 flex items-start gap-3 rounded-lg px-5 py-3 transition-colors hover:bg-zinc-800/30"
                 >
-                  <div className="flex-1 min-w-0">
-                    <p className="truncate text-sm text-white">{run.question}</p>
-                    <p className="text-xs text-zinc-500">{formatRelative(run.created_at)}</p>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm text-white group-hover:text-violet-200 transition-colors">{run.question}</p>
+                    <p className="text-xs text-zinc-600">{formatRelative(run.created_at)}</p>
                   </div>
-                  <span className={`text-xs font-medium ${statusColor(run.status)}`}>
+                  <span className={`shrink-0 text-xs font-medium ${statusColor(run.status)}`}>
                     {run.status}
                   </span>
                 </Link>

@@ -3,7 +3,7 @@
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Download } from "lucide-react";
+import { ArrowLeft, ChevronDown, Download } from "lucide-react";
 import { api, type Entitlements, type Run } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import {
@@ -25,7 +25,6 @@ function wsUrlForRun(base: string, runId: string, token: string): string {
     ? trimmed.replace(/^https/, "wss")
     : trimmed.replace(/^http/, "ws");
   // TODO: Security - move token to WebSocket subprotocol or post-connect auth message
-  // to avoid token appearing in server logs and browser history
   return `${wsBase}/ws/${encodeURIComponent(runId)}?token=${encodeURIComponent(token)}`;
 }
 
@@ -96,6 +95,26 @@ function InlineMd({ text }: { text: string }) {
   );
 }
 
+function DetailsBlock({
+  summary,
+  children,
+}: {
+  summary: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <details className="group rounded-lg border border-zinc-800 bg-zinc-900/30 text-sm">
+      <summary className="flex cursor-pointer items-center justify-between px-4 py-3 text-zinc-400 hover:text-zinc-200 transition-colors">
+        <span>{summary}</span>
+        <ChevronDown className="chevron h-3.5 w-3.5 shrink-0 opacity-50 transition-transform duration-200 group-open:rotate-180" />
+      </summary>
+      <div className="border-t border-zinc-800">
+        {children}
+      </div>
+    </details>
+  );
+}
+
 function RunOutcomePanel({ result }: { result: Record<string, unknown> }) {
   const winner = typeof result.winner === "string" ? result.winner : "";
   const finalResolution =
@@ -112,8 +131,8 @@ function RunOutcomePanel({ result }: { result: Record<string, unknown> }) {
     <div className="space-y-6">
       {top3.length > 0 && (
         <div>
-          <h3 className="mb-2 text-sm font-semibold text-zinc-300">Top proposals (moderator)</h3>
-          <ul className="space-y-4">
+          <h3 className="mb-3 text-sm font-semibold text-zinc-300">Top proposals</h3>
+          <ul className="space-y-3">
             {top3.map((row, idx) => {
               const rank = row.rank;
               const agent = typeof row.agent === "string" ? row.agent : "";
@@ -132,12 +151,12 @@ function RunOutcomePanel({ result }: { result: Record<string, unknown> }) {
                     {role ? <span className="text-zinc-500"> — {role}</span> : null}
                   </p>
                   {resolution ? (
-                    <p className="mt-2 text-sm text-zinc-200 whitespace-pre-wrap break-words">
+                    <p className="mt-2 whitespace-pre-wrap break-words text-sm text-zinc-200">
                       <InlineMd text={resolution} />
                     </p>
                   ) : null}
                   {summary ? (
-                    <p className="mt-2 text-sm text-zinc-400 whitespace-pre-wrap break-words">
+                    <p className="mt-2 whitespace-pre-wrap break-words text-sm text-zinc-400">
                       <InlineMd text={summary} />
                     </p>
                   ) : null}
@@ -161,17 +180,17 @@ function RunOutcomePanel({ result }: { result: Record<string, unknown> }) {
       )}
 
       {(winner || finalResolution) && (
-        <div className="rounded-lg border border-zinc-700/80 bg-zinc-900/40 p-4">
+        <div className="rounded-lg border border-emerald-800/30 bg-emerald-950/10 p-4">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-emerald-400/90">Outcome</h3>
           {winner ? (
             <p className="mt-2 text-sm text-zinc-300">
-              <span className="font-medium text-zinc-300/90">With the intelligence of the entire council, the final resolution was prepared by: </span>
+              <span className="text-zinc-400">Final resolution prepared by: </span>
               <span className="font-medium text-white">{winner}</span>
             </p>
           ) : null}
           {finalResolution ? (
             <div className="mt-3 text-sm leading-relaxed text-zinc-200">
-              <p className="text-xs text-zinc-500 mb-1">Consensus resolution</p>
+              <p className="mb-1 text-xs text-zinc-500">Consensus resolution</p>
               <p className="whitespace-pre-wrap break-words">
                 <InlineMd text={finalResolution} />
               </p>
@@ -181,29 +200,27 @@ function RunOutcomePanel({ result }: { result: Record<string, unknown> }) {
       )}
 
       {model ? (
-        <p className="text-xs text-zinc-500">
-          Model: <span className="text-zinc-400">{model}</span>
+        <p className="text-xs text-zinc-600">
+          Model: <span className="text-zinc-500">{model}</span>
         </p>
       ) : null}
 
       {resolutions && Object.keys(resolutions).length > 0 && (
-        <details className="rounded-lg border border-zinc-800 bg-zinc-900/30 text-sm">
-          <summary className="cursor-pointer px-4 py-3 text-zinc-400">Agent resolutions</summary>
-          <ul className="space-y-2 border-t border-zinc-800 px-4 py-3 text-zinc-300">
+        <DetailsBlock summary="Agent resolutions">
+          <ul className="space-y-2 px-4 py-3 text-zinc-300">
             {Object.entries(resolutions).map(([name, text]) => (
               <li key={name}>
                 <span className="font-medium text-zinc-200">{name}: </span>
-                <span className="whitespace-pre-wrap break-words">{text}</span>
+                <span className="whitespace-pre-wrap break-words text-zinc-400">{text}</span>
               </li>
             ))}
           </ul>
-        </details>
+        </DetailsBlock>
       )}
 
       {voteRounds.length > 0 && (
-        <details className="rounded-lg border border-zinc-800 bg-zinc-900/30 text-sm">
-          <summary className="cursor-pointer px-4 py-3 text-zinc-400">Vote rounds</summary>
-          <ol className="list-decimal space-y-2 border-t border-zinc-800 px-4 py-3 pl-8 text-zinc-400">
+        <DetailsBlock summary="Vote rounds">
+          <ol className="list-decimal space-y-2 px-4 py-3 pl-9 text-zinc-500">
             {voteRounds.map((r, i) => (
               <li key={i} className="font-mono text-xs">
                 {typeof r === "object" && r !== null
@@ -212,7 +229,7 @@ function RunOutcomePanel({ result }: { result: Record<string, unknown> }) {
               </li>
             ))}
           </ol>
-        </details>
+        </DetailsBlock>
       )}
     </div>
   );
@@ -397,7 +414,7 @@ export default function RunDetailPage({
 
   if (run.error || !run.data) {
     return (
-      <div className="text-center py-16">
+      <div className="py-16 text-center">
         <p className="mb-4 text-zinc-400">Run not found or you don&apos;t have access.</p>
         <Link href="/runs">
           <Button variant="outline">Back to runs</Button>
@@ -412,15 +429,15 @@ export default function RunDetailPage({
     <div className="space-y-6">
       <div className="flex items-start gap-4">
         <Link href="/runs">
-          <Button size="icon" variant="ghost">
+          <Button size="icon" variant="ghost" className="transition-transform hover:-translate-x-0.5">
             <ArrowLeft className="h-4 w-4" />
           </Button>
         </Link>
-        <div className="flex-1 min-w-0">
-          <h1 className="text-xl font-bold text-white break-words">{r.question}</h1>
-          <p className="mt-1 text-xs text-zinc-500">ID: {r.run_id}</p>
+        <div className="min-w-0 flex-1">
+          <h1 className="break-words text-xl font-bold text-white">{r.question}</h1>
+          <p className="mt-1 font-mono text-xs text-zinc-600">{r.run_id}</p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex shrink-0 items-center gap-2">
           <Badge variant={runBadgeVariant(r.status)}>{r.status}</Badge>
           {r.status === "completed" && canExport && (
             <Button size="sm" variant="outline" onClick={exportRun} className="gap-2">
@@ -441,19 +458,19 @@ export default function RunDetailPage({
         <CardContent className="pt-5">
           <dl className="grid grid-cols-3 gap-4 text-sm">
             <div>
-              <dt className="text-xs text-zinc-500 mb-0.5">Created</dt>
-              <dd className="text-white">{formatDate(r.created_at)}</dd>
+              <dt className="mb-0.5 text-xs text-zinc-500">Created</dt>
+              <dd className="text-zinc-200">{formatDate(r.created_at)}</dd>
             </div>
             {r.started_at && (
               <div>
-                <dt className="text-xs text-zinc-500 mb-0.5">Started</dt>
-                <dd className="text-white">{formatDate(r.started_at)}</dd>
+                <dt className="mb-0.5 text-xs text-zinc-500">Started</dt>
+                <dd className="text-zinc-200">{formatDate(r.started_at)}</dd>
               </div>
             )}
             {r.finished_at && (
               <div>
-                <dt className="text-xs text-zinc-500 mb-0.5">Finished</dt>
-                <dd className="text-white">{formatDate(r.finished_at)}</dd>
+                <dt className="mb-0.5 text-xs text-zinc-500">Finished</dt>
+                <dd className="text-zinc-200">{formatDate(r.finished_at)}</dd>
               </div>
             )}
           </dl>
@@ -463,11 +480,11 @@ export default function RunDetailPage({
       {(r.status === "pending" || r.status === "running") && (
         <Card>
           <CardContent className="flex items-center gap-3 pt-5">
-            <div className="h-2.5 w-2.5 animate-pulse rounded-full bg-blue-400" />
-            <p className="text-sm text-zinc-300">
+            <div className="h-2 w-2 animate-pulse rounded-full bg-blue-400" />
+            <p className="text-sm text-zinc-400">
               {r.status === "pending"
                 ? "Run is queued — waiting for a worker…"
-                : "Running!"}
+                : "Running…"}
             </p>
           </CardContent>
         </Card>
@@ -475,13 +492,21 @@ export default function RunDetailPage({
 
       {agentNames.length > 0 && (
         <div>
-          <h2 className="mb-3 text-sm font-semibold text-zinc-400">Agents</h2>
+          <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-zinc-600">Agents</h2>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             {agentNames.map((name) => {
               const f = displayFeeds[name];
               if (!f) return null;
+              const isStreaming = !!f.streamBuf;
               return (
-                <Card key={name} className="flex min-h-[200px] flex-col">
+                <Card
+                  key={name}
+                  className={`flex min-h-[200px] flex-col transition-all duration-300 ${
+                    isStreaming
+                      ? "border-blue-800/40 ring-1 ring-blue-500/15"
+                      : ""
+                  }`}
+                >
                   <CardHeader className="pb-2">
                     <CardTitle className="text-base text-white">{name}</CardTitle>
                     <p className="text-xs text-zinc-500">{f.role}</p>
@@ -489,7 +514,7 @@ export default function RunDetailPage({
                   <CardContent className="flex-1 space-y-3 text-sm text-zinc-300">
                     {f.sections.map((s, i) => (
                       <div key={`${s.phase}-${i}`}>
-                        <p className="mb-1 text-xs font-medium text-violet-400/90">
+                        <p className="mb-1 text-xs font-medium text-violet-400/80">
                           {phaseLabel(s.phase)}
                         </p>
                         <p className="whitespace-pre-wrap break-words">
@@ -499,7 +524,8 @@ export default function RunDetailPage({
                     ))}
                     {f.streamBuf ? (
                       <div>
-                        <p className="mb-1 text-xs font-medium text-blue-400/90">
+                        <p className="mb-1 flex items-center gap-1.5 text-xs font-medium text-blue-400/80">
+                          <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-blue-400" />
                           Speaking…
                         </p>
                         <p className="whitespace-pre-wrap break-words text-zinc-200">
@@ -508,7 +534,7 @@ export default function RunDetailPage({
                       </div>
                     ) : null}
                     {f.sections.length === 0 && !f.streamBuf && (
-                      <p className="text-xs text-zinc-600">Waiting…</p>
+                      <p className="text-xs text-zinc-700">Waiting…</p>
                     )}
                   </CardContent>
                 </Card>
@@ -521,7 +547,7 @@ export default function RunDetailPage({
       {dmLog.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm">Private DMs (observer)</CardTitle>
+            <CardTitle className="text-sm">Private DMs</CardTitle>
           </CardHeader>
           <CardContent>
             <ul className="space-y-1 text-xs text-zinc-500">
