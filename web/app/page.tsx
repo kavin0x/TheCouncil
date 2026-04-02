@@ -235,10 +235,10 @@ export default function LandingPage() {
               <Link href="/pricing" className="hover:text-zinc-400 transition-colors">
                 Pricing
               </Link>
-              <Link href="/legal" className="hover:text-zinc-400 transition-colors">
+              <Link href="/legal#privacy" className="hover:text-zinc-400 transition-colors">
                 Privacy
               </Link>
-              <Link href="/legal" className="hover:text-zinc-400 transition-colors">
+              <Link href="/legal#tos" className="hover:text-zinc-400 transition-colors">
                 Terms
               </Link>
             </div>

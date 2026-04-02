@@ -2,6 +2,7 @@
 SQLAlchemy ORM models for TheCouncil.
 
 Tables:
+  users          — registered user accounts (email, tier, ToS acceptance)
   deliberations  — council debate sessions (top-level entity)
   personas       — saved agent personas per user
   artifacts      — synthesized output artifacts from a deliberation
@@ -35,6 +36,38 @@ def _uuid() -> str:
 
 def _now() -> float:
     return time.time()
+
+
+# ---------------------------------------------------------------------------
+# User account
+# ---------------------------------------------------------------------------
+
+
+class User(Base):
+    """A registered user account."""
+
+    __tablename__ = "users"
+
+    id: str = Column(String(36), primary_key=True, default=_uuid)
+    email: str = Column(String(255), nullable=False, unique=True, index=True)
+    tier: str = Column(String(32), nullable=False, default="basic")
+    created_at: float = Column(Float, nullable=False, default=_now)
+
+    # Terms-of-service acceptance — null means not yet accepted.
+    # Stored as a Unix timestamp (float); tos_version records the version string
+    # (e.g. "2026-04-01") accepted at that moment.
+    tos_accepted_at: float | None = Column(Float, nullable=True)
+    tos_version: str | None = Column(String(32), nullable=True)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "user_id": self.id,
+            "email": self.email,
+            "tier": self.tier,
+            "created_at": self.created_at,
+            "tos_accepted_at": self.tos_accepted_at,
+            "tos_version": self.tos_version,
+        }
 
 
 # ---------------------------------------------------------------------------

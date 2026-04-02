@@ -115,6 +115,15 @@ export function Sidebar() {
           <LogOut className="h-3.5 w-3.5" />
           Sign out
         </button>
+        <div className="mt-1 flex items-center gap-3 px-3 py-1">
+          <Link href="/legal#tos" className="text-[10px] text-zinc-700 hover:text-zinc-500 transition-colors">
+            Terms
+          </Link>
+          <span className="text-zinc-800">·</span>
+          <Link href="/legal#privacy" className="text-[10px] text-zinc-700 hover:text-zinc-500 transition-colors">
+            Privacy
+          </Link>
+        </div>
       </div>
     </aside>
   );
