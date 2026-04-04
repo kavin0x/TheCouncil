@@ -40,49 +40,47 @@ import secrets
 import time
 import uuid
 from contextlib import asynccontextmanager
-
-logger = logging.getLogger(__name__)
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Annotated, Any
 
 from dotenv import load_dotenv
 
 if os.environ.get("PYTEST_CURRENT_TEST") is None:
     load_dotenv()
 
-from datetime import datetime, timezone
-from dataclasses import dataclass
-from typing import Annotated, Any
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect, status  # noqa: E402  # type: ignore
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402  # type: ignore
+from fastapi.responses import JSONResponse  # noqa: E402  # type: ignore
+from fastmcp import FastMCP  # noqa: E402
+from fastmcp.server.dependencies import get_http_request  # noqa: E402
+from fastmcp.utilities.lifespan import combine_lifespans  # noqa: E402
+from pydantic import BaseModel, Field  # noqa: E402
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect, status  # type: ignore
-from fastapi.middleware.cors import CORSMiddleware  # type: ignore
-from fastapi.responses import JSONResponse  # type: ignore
-from fastmcp import FastMCP
-from fastmcp.server.dependencies import get_http_request
-from fastmcp.utilities.lifespan import combine_lifespans
-from pydantic import BaseModel, Field
-
-from council.core.runner import CouncilRunBlockedError, run_council_for_api
-from council.realtime import emit_run_event, register_ws_broadcast
-from council.models.state import (
+from council.core.runner import CouncilRunBlockedError, run_council_for_api  # noqa: E402
+from council.realtime import emit_run_event, register_ws_broadcast  # noqa: E402
+from council.models.state import (  # noqa: E402
     Run,
     RunNotFoundError,
     RunStatus,
     run_queue,
     run_store,
 )
-from council.features.sandbox import (
+from council.features.sandbox import (  # noqa: E402
     SandboxDisabledError,
     get_desktop_sandbox_stream_url,
     kill_desktop_sandbox,
     run_sandbox_task,
 )
-from council.features.web_search import WebSearchDisabledError, web_search
-from council.models.subscriptions import (
+from council.models.subscriptions import (  # noqa: E402
     TierName,
     get_tier,
     is_within_run_limit,
     parse_webhook_event,
     resolve_tier_from_webhook,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _get_api_secret() -> str:
