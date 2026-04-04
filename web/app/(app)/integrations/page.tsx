@@ -47,6 +47,10 @@ function CodeBlock({ code, lang = "json" }: { code: string; lang?: string }) {
 }
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "https://api.thecouncil.ai";
+const MCP_BASE =
+  typeof window !== "undefined"
+    ? window.location.origin
+    : process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
 function McpJsonSnippet({ apiKey }: { apiKey: string }) {
   const masked = apiKey.slice(0, 8) + "...";
@@ -54,7 +58,7 @@ function McpJsonSnippet({ apiKey }: { apiKey: string }) {
     {
       mcpServers: {
         thecouncil: {
-          url: `${API_BASE}/mcp`,
+          url: `${MCP_BASE}/mcp`,
           headers: {
             Authorization: `Bearer ${masked}`,
           },
@@ -154,11 +158,10 @@ export default function IntegrationsPage() {
 
           <div className="text-sm text-zinc-500">
             <p className="font-medium text-zinc-300 mb-2">MCP server URL</p>
-            <CodeBlock code={`${API_BASE}/mcp`} lang="url" />
+            <CodeBlock code={`${MCP_BASE}/mcp`} lang="url" />
             <p className="mt-2 text-xs text-zinc-500">
-              Local dev: use <code className="rounded bg-zinc-800 px-1">NEXT_PUBLIC_API_BASE_URL=http://localhost:3000</code>{" "}
-              so this URL hits Next; <code className="rounded bg-zinc-800 px-1">app/mcp/[[...path]]/route.ts</code> proxies to the API and
-              forwards <code className="rounded bg-zinc-800 px-1">Authorization</code> (Next rewrites do not). Override the API origin with{" "}
+              Requests to <code className="rounded bg-zinc-800 px-1">app/mcp/[[...path]]/route.ts</code> are proxied to the API and the{" "}
+              <code className="rounded bg-zinc-800 px-1">Authorization</code> header is forwarded automatically. Override the API origin with{" "}
               <code className="rounded bg-zinc-800 px-1">MCP_PROXY_TARGET</code> if needed. Same <code className="rounded bg-zinc-800 px-1">Bearer</code> as REST.
             </p>
           </div>
@@ -191,7 +194,7 @@ ${JSON.stringify(
   {
     mcpServers: {
       thecouncil: {
-        url: `${API_BASE}/mcp`,
+        url: `${MCP_BASE}/mcp`,
         headers: { Authorization: "Bearer YOUR_API_KEY" },
       },
     },

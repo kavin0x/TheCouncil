@@ -274,7 +274,7 @@ class LLMGuardrailBackend(GuardrailBackend):
             return []  # Fail open on non-event-loop errors
 
     async def screen_async(self, text: str) -> list[GuardrailViolation]:
-        """Async LLM classification. Fails securely (returns violation) on API errors."""
+        """Async LLM classification. Fails open (returns no violations) on API errors."""
         import logging
         log = logging.getLogger(__name__)
         try:
@@ -284,14 +284,10 @@ class LLMGuardrailBackend(GuardrailBackend):
             ]
             raw: str = await self._api_call(input_msgs, max_tokens=120, model=self._model)
         except Exception as exc:
-            # Fail securely: log the error and return a violation to block unsafe input
+            # Fail open: log the error but allow the request through so LLM
+            # unavailability doesn't block users (consistent with class contract).
             log.error("Guardrail API error: %s", exc)
-            return [
-                GuardrailViolation(
-                    violation_type=ViolationType.INJECTION,
-                    description="Safety check failed; request blocked.",
-                )
-            ]
+            return []
 
         if not raw or raw.strip().upper().startswith("CLEAN"):
             return []

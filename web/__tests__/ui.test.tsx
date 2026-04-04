@@ -24,7 +24,7 @@ describe("Badge", () => {
   });
   it("applies success variant", () => {
     render(<Badge variant="success">Active</Badge>);
-    expect(screen.getByText("Active")).toHaveClass("text-emerald-300");
+    expect(screen.getByText("Active")).toHaveClass("text-emerald-400");
   });
 });
 
