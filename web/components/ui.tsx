@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 // Button
 // ---------------------------------------------------------------------------
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 rounded text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1 focus-visible:ring-offset-zinc-950 disabled:pointer-events-none disabled:opacity-40",
+  "inline-flex items-center justify-center gap-2 rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1 focus-visible:ring-offset-zinc-950 disabled:pointer-events-none disabled:opacity-40",
   {
     variants: {
       variant: {
@@ -67,7 +67,7 @@ Button.displayName = "Button";
 // Badge
 // ---------------------------------------------------------------------------
 const badgeVariants = cva(
-  "inline-flex items-center rounded px-2 py-0.5 font-mono text-[10px] font-medium uppercase tracking-wide",
+  "inline-flex items-center rounded-md px-2 py-0.5 font-mono text-[10px] font-medium uppercase tracking-wide",
   {
     variants: {
       variant: {
@@ -102,7 +102,7 @@ export function Card({
   return (
     <div
       className={cn(
-        "rounded-lg border border-zinc-800 bg-zinc-900/50",
+        "rounded-lg border border-zinc-800 bg-zinc-900/50 transition-colors duration-150",
         className
       )}
       {...props}
@@ -169,7 +169,7 @@ export const Input = React.forwardRef<
   <input
     ref={ref}
     className={cn(
-      "flex h-8 w-full rounded border border-zinc-700 bg-zinc-800/60 px-3 py-1 text-sm text-white placeholder:text-zinc-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1 focus-visible:ring-offset-zinc-950 disabled:opacity-40",
+      "flex h-8 w-full rounded-md border border-zinc-700 bg-zinc-800/60 px-3 py-1 text-sm text-white placeholder:text-zinc-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1 focus-visible:ring-offset-zinc-950 disabled:opacity-40",
       className
     )}
     {...props}
@@ -187,7 +187,7 @@ export const Textarea = React.forwardRef<
   <textarea
     ref={ref}
     className={cn(
-      "flex min-h-[80px] w-full rounded border border-zinc-700 bg-zinc-800/60 px-3 py-2 text-sm text-white placeholder:text-zinc-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1 focus-visible:ring-offset-zinc-950 disabled:opacity-40 resize-none",
+      "flex min-h-[80px] w-full rounded-md border border-zinc-700 bg-zinc-800/60 px-3 py-2 text-sm text-white placeholder:text-zinc-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1 focus-visible:ring-offset-zinc-950 disabled:opacity-40 resize-none",
       className
     )}
     {...props}
@@ -248,8 +248,11 @@ export function Progress({
       {...props}
     >
       <ProgressPrimitive.Indicator
-        className="h-full bg-violet-500 transition-all duration-500"
-        style={{ transform: `translateX(-${100 - (value ?? 0)}%)` }}
+        className="h-full transition-all duration-500"
+        style={{
+          transform: `translateX(-${100 - (value ?? 0)}%)`,
+          background: "linear-gradient(to right, #7c3aed, #a78bfa)",
+        }}
       />
     </ProgressPrimitive.Root>
   );
@@ -264,7 +267,7 @@ export function Skeleton({
 }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn("animate-pulse rounded bg-zinc-800/80", className)}
+      className={cn("animate-pulse rounded-md bg-zinc-800/80", className)}
       {...props}
     />
   );
@@ -283,7 +286,7 @@ export const SelectTrigger = React.forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      "flex h-8 w-full items-center justify-between rounded border border-zinc-700 bg-zinc-800/60 px-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-1 focus:ring-offset-zinc-950 disabled:opacity-40",
+      "flex h-8 w-full items-center justify-between rounded-md border border-zinc-700 bg-zinc-800/60 px-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-1 focus:ring-offset-zinc-950 disabled:opacity-40",
       className
     )}
     {...props}
@@ -322,7 +325,7 @@ export const SelectItem = React.forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex cursor-pointer select-none items-center rounded py-1.5 pl-7 pr-2 text-sm text-zinc-300 hover:bg-zinc-800 focus:bg-zinc-800 focus:outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-40",
+      "relative flex cursor-pointer select-none items-center rounded-md py-1.5 pl-7 pr-2 text-sm text-zinc-300 hover:bg-zinc-800 focus:bg-zinc-800 focus:outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-40",
       className
     )}
     {...props}
@@ -353,13 +356,13 @@ export const DialogContent = React.forwardRef<
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        "fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-xl border border-zinc-700 bg-zinc-950 p-6 shadow-2xl shadow-black/60 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+        "fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-xl border border-zinc-700/80 bg-zinc-950 p-6 shadow-2xl shadow-black/60 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
         className
       )}
       {...props}
     >
       {children}
-      <DialogPrimitive.Close className="absolute right-4 top-4 rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500">
+      <DialogPrimitive.Close className="absolute right-4 top-4 rounded-md p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500">
         <X className="h-4 w-4" />
       </DialogPrimitive.Close>
     </DialogPrimitive.Content>
@@ -469,7 +472,7 @@ export const ToastClose = React.forwardRef<
   <ToastPrimitive.Close
     ref={ref}
     className={cn(
-      "rounded p-0.5 text-zinc-500 hover:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500",
+      "rounded-md p-0.5 text-zinc-500 hover:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500",
       className
     )}
     {...props}
@@ -496,7 +499,7 @@ export function Tooltip({
       <TooltipPrimitive.Trigger asChild>{children}</TooltipPrimitive.Trigger>
       <TooltipPrimitive.Portal>
         <TooltipPrimitive.Content
-          className="z-50 rounded border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 font-mono text-[11px] text-zinc-200 shadow-lg shadow-black/30"
+          className="z-50 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 font-mono text-[11px] text-zinc-200 shadow-lg shadow-black/30"
           sideOffset={4}
         >
           {content}

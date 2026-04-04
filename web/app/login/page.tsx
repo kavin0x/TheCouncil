@@ -33,16 +33,16 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-zinc-950 px-4">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-[#070b0f] px-4">
       <div className="w-full max-w-sm">
         <Link href="/" className="mb-8 flex items-center justify-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-600 text-white text-sm font-bold">
+          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-violet-600 text-sm font-bold text-white shadow-lg shadow-violet-500/20">
             TC
           </div>
           <span className="text-base font-semibold text-white">TheCouncil</span>
         </Link>
 
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-7">
+        <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-7">
           <h1 className="mb-1 text-xl font-bold text-white">Sign in</h1>
           <p className="mb-6 text-sm text-zinc-400">
             Enter your API key to access your council dashboard.
@@ -88,11 +88,11 @@ export default function LoginPage() {
 
         <p className="mt-6 text-center text-xs text-zinc-700">
           By signing in you agree to our{" "}
-          <Link href="/legal#tos" className="hover:text-zinc-500 underline underline-offset-2">
+          <Link href="/legal#tos" className="underline underline-offset-2 hover:text-zinc-500">
             Terms of Service
           </Link>{" "}
           and{" "}
-          <Link href="/legal#privacy" className="hover:text-zinc-500 underline underline-offset-2">
+          <Link href="/legal#privacy" className="underline underline-offset-2 hover:text-zinc-500">
             Privacy Policy
           </Link>
           .

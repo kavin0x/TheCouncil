@@ -4,6 +4,7 @@
 :root {
   /* Surfaces */
   --bg-base:    #070b0f;
+  --bg-sidebar: #0a0d12;
   --bg-surface: #0d1117;
   --bg-overlay: #161c24;
   --bg-raised:  #1c2430;
@@ -77,6 +78,15 @@ code, pre, kbd, .font-mono {
   background: rgba(255, 255, 255, 0.20);
 }
 
+/* ── Hide scrollbar utility ─────────────────────────────────────────────────── */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
 /* ── Selection ──────────────────────────────────────────────────────────────── */
 ::selection {
   background: rgba(6, 182, 212, 0.25);
@@ -107,4 +117,12 @@ a, button {
   transition-property: color, background-color, border-color, opacity, box-shadow;
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
   transition-duration: 120ms;
+}
+
+/* ── Details/summary custom styling ────────────────────────────────────────── */
+details > summary {
+  list-style: none;
+}
+details > summary::-webkit-details-marker {
+  display: none;
 }

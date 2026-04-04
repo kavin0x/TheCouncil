@@ -56,25 +56,27 @@ export default function SettingsPage() {
           <CardTitle>API Key</CardTitle>
           <CardDescription>
             Use this key in the Authorization header:{" "}
-            <code className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-violet-300">
+            <code className="rounded-md bg-zinc-800 px-1.5 py-0.5 text-xs text-violet-300">
               Authorization: Bearer &lt;key&gt;
             </code>
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800/50 px-3 py-2">
-            <span className="flex-1 font-mono text-sm text-zinc-300 break-all">
+          <div className="flex items-center gap-2 rounded-lg border border-zinc-700/80 bg-zinc-800/40 px-3 py-2.5">
+            <span className="flex-1 break-all font-mono text-sm tracking-wide text-zinc-300">
               {token ? (show ? token : maskKey(token)) : "—"}
             </span>
             <button
               onClick={() => setShow((s) => !s)}
-              className="text-zinc-400 hover:text-white transition-colors"
+              className="shrink-0 text-zinc-500 hover:text-white transition-colors"
+              title={show ? "Hide key" : "Show key"}
             >
               {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </button>
             <button
               onClick={copy}
-              className="text-zinc-400 hover:text-white transition-colors"
+              className="shrink-0 text-zinc-500 hover:text-white transition-colors"
+              title="Copy to clipboard"
             >
               <Copy className="h-4 w-4" />
             </button>
@@ -112,7 +114,7 @@ export default function SettingsPage() {
               {ent.data?.display_name ?? "—"}
             </Badge>
           </div>
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
             {[
               ["Runs / month", ent.data?.limits.runs_per_month],
               ["Max agents", ent.data?.limits.max_agents],
@@ -123,7 +125,7 @@ export default function SettingsPage() {
               ],
             ].map(([label, val]) => (
               <div key={String(label)}>
-                <dt className="text-zinc-500 text-xs">{label}</dt>
+                <dt className="text-xs text-zinc-500">{label}</dt>
                 <dd className="text-zinc-200">{String(val ?? "—")}</dd>
               </div>
             ))}
@@ -133,10 +135,15 @@ export default function SettingsPage() {
 
       <Separator />
 
-      {/* Danger zone */}
+      {/* Session */}
       <div className="space-y-2">
         <p className="text-sm font-medium text-zinc-400">Session</p>
-        <Button variant="outline" size="sm" onClick={handleLogout} className="gap-2 text-red-400 border-red-900 hover:bg-red-950">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleLogout}
+          className="gap-2 text-red-400 hover:bg-red-950/40 hover:text-red-300"
+        >
           <LogOut className="h-4 w-4" /> Sign out
         </Button>
       </div>
