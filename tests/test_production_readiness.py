@@ -88,7 +88,7 @@ class TestAuthenticationValidation:
         """POST /runs requires Authorization header."""
         response = client.post("/runs", json={"question": "Test?"})
         assert response.status_code == 401
-        assert "Authorization" in response.json()["detail"].lower()
+        assert "authorization" in response.json()["detail"].lower()
 
     def test_create_run_rejects_invalid_token(self, client):
         """Invalid Bearer token is rejected."""
@@ -112,8 +112,9 @@ class TestAuthenticationValidation:
 class TestRequestValidation:
     """Test request input validation."""
 
-    def test_create_run_question_too_long(self, client):
+    def test_create_run_question_too_long(self, client, monkeypatch):
         """Question exceeding max length is rejected."""
+        monkeypatch.setenv("API_SECRET_KEY", "test-key")
         long_question = "a" * 5000  # Exceeds max 4096
         response = client.post(
             "/runs",
@@ -122,8 +123,9 @@ class TestRequestValidation:
         )
         assert response.status_code == 422
 
-    def test_create_run_empty_question(self, client):
+    def test_create_run_empty_question(self, client, monkeypatch):
         """Empty question is rejected."""
+        monkeypatch.setenv("API_SECRET_KEY", "test-key")
         response = client.post(
             "/runs",
             json={"question": ""},
@@ -195,9 +197,15 @@ class TestCORSConfiguration:
 
     def test_cors_headers_present(self, client):
         """CORS headers are present for allowed origins."""
-        response = client.options("/health")
-        # Headers should indicate CORS is configured
+        response = client.options(
+            "/health",
+            headers={
+                "Origin": "http://localhost:3000",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
         assert response.status_code == 200
+        assert "access-control-allow-origin" in response.headers
 
 
 class TestTypeValidation:
@@ -215,8 +223,9 @@ class TestTypeValidation:
         )
         assert response.status_code == 422
 
-    def test_config_must_be_dict(self, client):
+    def test_config_must_be_dict(self, client, monkeypatch):
         """Config field must be an object/dict."""
+        monkeypatch.setenv("API_SECRET_KEY", "test-key")
         response = client.post(
             "/runs",
             json={"question": "Test?", "config": "not_a_dict"},

@@ -28,7 +28,7 @@ cp .env.example .env        # add keys
 uvicorn api:app --reload
 
 # MCP server (remote) is mounted at:
-#   http://localhost:8000/mcp
+#   http://localhost:3000/mcp  (Next.js frontend proxy → backend)
 # and is tier-gated via DEFAULT_SUBSCRIPTION_TIER (demo only).
 
 # CLI (see council.py --help)
