@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
 import time
+import urllib.parse
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -25,10 +27,6 @@ def register_ws_broadcast(
 
 def _uses_redis_stream() -> bool:
     return hasattr(_bus, "_redis")
-
-
-import ipaddress
-import urllib.parse
 
 
 def _is_safe_event_bridge_url(url: str) -> bool:
