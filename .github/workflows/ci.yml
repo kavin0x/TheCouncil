@@ -39,7 +39,9 @@ jobs:
       - name: Security scan (pip-audit)
         run: |
           pip install pip-audit
-          pip-audit --requirement requirements.txt --skip-editable
+          # CVE-2026-25990: pillow transitive via e2b-desktop, which pins pillow<12.0.0.
+          # No compatible fix available until e2b-desktop relaxes its constraint.
+          pip-audit --requirement requirements.txt --skip-editable --ignore-vuln CVE-2026-25990
 
   web:
     name: Web — Lint, Typecheck & Test
