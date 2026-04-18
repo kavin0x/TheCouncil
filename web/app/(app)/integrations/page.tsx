@@ -68,11 +68,11 @@ function McpJsonSnippet({ apiKey }: { apiKey: string }) {
 }
 
 export default function IntegrationsPage() {
-  const { token } = useAuth();
+  const { getToken } = useAuth();
 
   const ent = useQuery<Entitlements>({
     queryKey: ["entitlements"],
-    queryFn: () => api.getEntitlements(token!),
+    queryFn: () => api.getEntitlements(getToken),
     staleTime: Infinity,
   });
 
@@ -121,14 +121,14 @@ export default function IntegrationsPage() {
         <CardContent className="space-y-5">
           <div>
             <p className="mb-1 text-sm font-medium text-zinc-300">
-              1. Copy your API key from{" "}
+              1. Generate an API key from{" "}
               <Link href="/settings" className="text-violet-400 hover:underline">
-                Settings
+                Settings → API Keys
               </Link>
               .
             </p>
             <p className="text-sm text-zinc-500">
-              You&apos;ll use it as the Bearer token in the MCP server config.
+              Use the <code className="rounded bg-zinc-800 px-1">tc_live_...</code> key as the Bearer token — your Clerk session is for the browser only.
             </p>
           </div>
 
@@ -137,7 +137,7 @@ export default function IntegrationsPage() {
               2. Add to <code className="rounded bg-zinc-800 px-1.5 text-xs">mcp.json</code>{" "}
               (Cursor) or <code className="rounded bg-zinc-800 px-1.5 text-xs">claude_desktop_config.json</code>
             </p>
-            {token && <McpJsonSnippet apiKey={token} />}
+            <McpJsonSnippet apiKey="tc_live_YOUR_KEY" />
           </div>
 
           <div>

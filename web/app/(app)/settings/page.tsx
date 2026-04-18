@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Copy, Eye, EyeOff, LogOut } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Copy, Key, LogOut, Plus, Trash2 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
-import { api, type Entitlements } from "@/lib/api";
+import { api, type ApiKey, type ApiKeyCreated, type Entitlements } from "@/lib/api";
 import {
   Badge,
   Button,
@@ -15,75 +15,151 @@ import {
   CardTitle,
   Separator,
 } from "@/components/ui";
-import { useRouter } from "next/navigation";
 
-function maskKey(key: string): string {
-  if (key.length <= 8) return "•".repeat(key.length);
-  return key.slice(0, 4) + "•".repeat(Math.max(8, key.length - 4));
+function formatDate(ts: number): string {
+  return new Date(ts * 1000).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
 }
 
 export default function SettingsPage() {
-  const { token, logout } = useAuth();
-  const router = useRouter();
-  const [show, setShow] = useState(false);
+  const { getToken, logout } = useAuth();
+  const qc = useQueryClient();
+  const [newKey, setNewKey] = useState<ApiKeyCreated | null>(null);
   const [copied, setCopied] = useState(false);
 
   const ent = useQuery<Entitlements>({
     queryKey: ["entitlements"],
-    queryFn: () => api.getEntitlements(token!),
+    queryFn: () => api.getEntitlements(getToken),
     staleTime: Infinity,
   });
 
-  function copy() {
-    if (!token) return;
-    navigator.clipboard.writeText(token);
+  const keysQuery = useQuery<ApiKey[]>({
+    queryKey: ["api-keys"],
+    queryFn: () => api.listApiKeys(getToken),
+  });
+
+  const createKey = useMutation({
+    mutationFn: () => api.createApiKey(getToken, { name: "My API Key" }),
+    onSuccess: (created) => {
+      setNewKey(created);
+      void qc.invalidateQueries({ queryKey: ["api-keys"] });
+    },
+  });
+
+  const revokeKey = useMutation({
+    mutationFn: (keyId: string) => api.revokeApiKey(getToken, keyId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["api-keys"] });
+    },
+  });
+
+  function copyNewKey() {
+    if (!newKey) return;
+    navigator.clipboard.writeText(newKey.plaintext_key);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  }
-
-  function handleLogout() {
-    logout();
-    router.push("/login");
   }
 
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-white">Settings</h1>
 
-      {/* API Key */}
+      {/* API Keys */}
       <Card>
         <CardHeader>
-          <CardTitle>API Key</CardTitle>
+          <CardTitle>API Keys</CardTitle>
           <CardDescription>
-            Use this key in the Authorization header:{" "}
+            Use these keys in the{" "}
             <code className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-violet-300">
               Authorization: Bearer &lt;key&gt;
-            </code>
+            </code>{" "}
+            header for programmatic or CLI access.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-800/50 px-3 py-2">
-            <span className="flex-1 font-mono text-sm text-zinc-300 break-all">
-              {token ? (show ? token : maskKey(token)) : "—"}
-            </span>
-            <button
-              onClick={() => setShow((s) => !s)}
-              className="text-zinc-400 hover:text-white transition-colors"
-            >
-              {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-            </button>
-            <button
-              onClick={copy}
-              className="text-zinc-400 hover:text-white transition-colors"
-            >
-              <Copy className="h-4 w-4" />
-            </button>
-          </div>
-          {copied && <p className="text-xs text-emerald-400">Copied to clipboard.</p>}
-          <p className="text-xs text-zinc-600">
-            This key is stored in your browser&apos;s local storage. Keep it secret.
-            Rotation requires a new key from your API dashboard.
-          </p>
+        <CardContent className="space-y-4">
+          {newKey && (
+            <div className="rounded-lg border border-amber-700/50 bg-amber-900/10 p-4 space-y-2">
+              <p className="text-xs font-medium text-amber-400">
+                Copy this now — you won&apos;t see it again.
+              </p>
+              <div className="flex items-center gap-2 rounded border border-zinc-700 bg-zinc-800/60 px-3 py-2">
+                <span className="flex-1 font-mono text-xs text-zinc-200 break-all">
+                  {newKey.plaintext_key}
+                </span>
+                <button
+                  onClick={copyNewKey}
+                  className="shrink-0 text-zinc-400 hover:text-white transition-colors"
+                >
+                  <Copy className="h-4 w-4" />
+                </button>
+              </div>
+              {copied && <p className="text-xs text-emerald-400">Copied to clipboard.</p>}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setNewKey(null)}
+                className="text-xs text-zinc-500"
+              >
+                Dismiss
+              </Button>
+            </div>
+          )}
+
+          {keysQuery.isLoading ? (
+            <div className="space-y-2">
+              {[...Array(2)].map((_, i) => (
+                <div key={i} className="h-12 animate-pulse rounded bg-zinc-800" />
+              ))}
+            </div>
+          ) : keysQuery.data?.length === 0 ? (
+            <p className="text-sm text-zinc-500">No API keys yet.</p>
+          ) : (
+            <div className="divide-y divide-zinc-800">
+              {keysQuery.data?.map((k) => (
+                <div key={k.key_id} className="flex items-center gap-3 py-3">
+                  <Key className="h-4 w-4 shrink-0 text-zinc-600" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-zinc-200">{k.name}</span>
+                      {!k.is_active && <Badge variant="danger">revoked</Badge>}
+                    </div>
+                    <p className="font-mono text-xs text-zinc-500">
+                      {k.key_prefix}••••••••
+                    </p>
+                    <p className="text-xs text-zinc-600">
+                      Created {formatDate(k.created_at)}
+                      {k.last_used_at ? ` · Last used ${formatDate(k.last_used_at)}` : ""}
+                    </p>
+                  </div>
+                  {k.is_active && (
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => revokeKey.mutate(k.key_id)}
+                      disabled={revokeKey.isPending}
+                      title="Revoke key"
+                    >
+                      <Trash2 className="h-3.5 w-3.5 text-red-400" />
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-2"
+            onClick={() => createKey.mutate()}
+            disabled={createKey.isPending}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            {createKey.isPending ? "Generating…" : "Generate new key"}
+          </Button>
         </CardContent>
       </Card>
 
@@ -136,7 +212,7 @@ export default function SettingsPage() {
       {/* Danger zone */}
       <div className="space-y-2">
         <p className="text-sm font-medium text-zinc-400">Session</p>
-        <Button variant="outline" size="sm" onClick={handleLogout} className="gap-2 text-red-400 border-red-900 hover:bg-red-950">
+        <Button variant="outline" size="sm" onClick={logout} className="gap-2 text-red-400 border-red-900 hover:bg-red-950">
           <LogOut className="h-4 w-4" /> Sign out
         </Button>
       </div>

@@ -253,7 +253,7 @@ export default function RunDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  const { token } = useAuth();
+  const { getToken } = useAuth();
   const queryClient = useQueryClient();
 
   const [feeds, setFeeds] = useState<Record<string, AgentFeed>>({});
@@ -313,7 +313,7 @@ export default function RunDetailPage({
 
   const run = useQuery<Run>({
     queryKey: ["run", id],
-    queryFn: () => api.getRun(token!, id),
+    queryFn: () => api.getRun(getToken, id),
     refetchInterval: (q) => {
       const s = q.state.data?.status;
       return s === "pending" || s === "running" ? 5000 : false;
@@ -322,7 +322,7 @@ export default function RunDetailPage({
 
   const ent = useQuery<Entitlements>({
     queryKey: ["entitlements"],
-    queryFn: () => api.getEntitlements(token!),
+    queryFn: () => api.getEntitlements(getToken),
     staleTime: Infinity,
   });
 
@@ -332,37 +332,42 @@ export default function RunDetailPage({
   const live = status === "pending" || status === "running";
 
   useEffect(() => {
-    if (!token || !id || !live) return;
+    if (!id || !live) return;
 
-    const url = wsUrlForRun(API_BASE, id, token);
-    const ws = new WebSocket(url);
+    let ws: WebSocket | null = null;
 
-    ws.onmessage = (ev) => {
-      try {
-        const msg = JSON.parse(ev.data as string) as WsEvent;
-        if (msg.type === "run_completed") {
-          void queryClient.invalidateQueries({ queryKey: ["run", id] });
-        }
-        if (msg.type === "run_snapshot" && msg.result && typeof msg.result === "object") {
-          const r = msg.result as { agents?: { name: string; role: string }[] };
-          if (r.agents?.length && Object.keys(feedsRef.current).length === 0) {
-            const next: Record<string, AgentFeed> = {};
-            for (const a of r.agents) {
-              next[a.name] = { role: a.role, sections: [], streamBuf: "" };
-            }
-            setFeeds(next);
+    getToken().then((token) => {
+      if (!token) return;
+      const url = wsUrlForRun(API_BASE, id, token);
+      ws = new WebSocket(url);
+
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data as string) as WsEvent;
+          if (msg.type === "run_completed") {
+            void queryClient.invalidateQueries({ queryKey: ["run", id] });
           }
+          if (msg.type === "run_snapshot" && msg.result && typeof msg.result === "object") {
+            const r = msg.result as { agents?: { name: string; role: string }[] };
+            if (r.agents?.length && Object.keys(feedsRef.current).length === 0) {
+              const next: Record<string, AgentFeed> = {};
+              for (const a of r.agents) {
+                next[a.name] = { role: a.role, sections: [], streamBuf: "" };
+              }
+              setFeeds(next);
+            }
+          }
+          applyWsEvent(msg);
+        } catch {
+          /* ignore */
         }
-        applyWsEvent(msg);
-      } catch {
-        /* ignore */
-      }
-    };
+      };
+    });
 
     return () => {
-      ws.close();
+      ws?.close();
     };
-  }, [token, id, live, applyWsEvent, queryClient]);
+  }, [getToken, id, live, applyWsEvent, queryClient]);
 
   const displayFeeds = useMemo(() => {
     if (run.data?.status === "completed" && run.data.result) {
@@ -412,7 +417,7 @@ export default function RunDetailPage({
     <div className="space-y-6">
       <div className="flex items-start gap-4">
         <Link href="/runs">
-          <Button size="icon" variant="ghost">
+          <Button size="icon" variant="ghost" aria-label="Back to runs">
             <ArrowLeft className="h-4 w-4" />
           </Button>
         </Link>

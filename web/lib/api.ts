@@ -115,12 +115,33 @@ export interface Billing {
   stripe_customer_id: string | null;
 }
 
+export interface ApiKey {
+  key_id: string;
+  owner_id: string;
+  name: string;
+  key_prefix: string;
+  created_at: number;
+  last_used_at: number | null;
+  is_active: boolean;
+}
+
+export interface ApiKeyCreated extends ApiKey {
+  plaintext_key: string;
+}
+
 async function request<T>(
   path: string,
-  token: string,
+  getToken: () => Promise<string | null>,
   options?: RequestInit,
   retries: number = 3
 ): Promise<T> {
+  const token = await getToken();
+  if (!token) {
+    const err = new Error("Not authenticated") as Error & { status: number };
+    err.status = 401;
+    throw err;
+  }
+
   let lastError: Error | null = null;
 
   for (let attempt = 0; attempt < retries; attempt++) {
@@ -189,35 +210,38 @@ async function request<T>(
 }
 
 export const api = {
-  getEntitlements: (token: string) =>
-    request<Entitlements>("/me/entitlements", token),
+  getEntitlements: (getToken: () => Promise<string | null>) =>
+    request<Entitlements>("/me/entitlements", getToken),
 
-  getUsage: (token: string) => request<Usage>("/me/usage", token),
+  getUsage: (getToken: () => Promise<string | null>) =>
+    request<Usage>("/me/usage", getToken),
 
-  getBilling: (token: string) => request<Billing>("/me/billing", token),
+  getBilling: (getToken: () => Promise<string | null>) =>
+    request<Billing>("/me/billing", getToken),
 
   createCheckout: (
-    token: string,
+    getToken: () => Promise<string | null>,
     body: { tier: string; success_url: string; cancel_url: string }
   ) =>
-    request<{ url: string }>("/me/billing/checkout", token, {
+    request<{ url: string }>("/me/billing/checkout", getToken, {
       method: "POST",
       body: JSON.stringify(body),
     }),
 
-  createPortal: (token: string, return_url: string) =>
-    request<{ url: string }>("/me/billing/portal", token, {
+  createPortal: (getToken: () => Promise<string | null>, return_url: string) =>
+    request<{ url: string }>("/me/billing/portal", getToken, {
       method: "POST",
       body: JSON.stringify({ return_url }),
     }),
 
-  listRuns: (token: string) => request<Run[]>("/runs", token),
+  listRuns: (getToken: () => Promise<string | null>) =>
+    request<Run[]>("/runs", getToken),
 
-  getRun: (token: string, id: string) =>
-    request<Run>(`/runs/${id}`, token),
+  getRun: (getToken: () => Promise<string | null>, id: string) =>
+    request<Run>(`/runs/${id}`, getToken),
 
   createRun: (
-    token: string,
+    getToken: () => Promise<string | null>,
     body: {
       question: string;
       config?: Record<string, unknown>;
@@ -225,16 +249,16 @@ export const api = {
       computer_use_enabled?: boolean;
     }
   ) =>
-    request<Run>("/runs", token, {
+    request<Run>("/runs", getToken, {
       method: "POST",
       body: JSON.stringify(body),
     }),
 
-  listPersonas: (token: string) =>
-    request<Persona[]>("/me/personas", token),
+  listPersonas: (getToken: () => Promise<string | null>) =>
+    request<Persona[]>("/me/personas", getToken),
 
   createPersona: (
-    token: string,
+    getToken: () => Promise<string | null>,
     body: {
       name: string;
       mode: string;
@@ -245,13 +269,13 @@ export const api = {
       is_active?: boolean;
     }
   ) =>
-    request<Persona>("/me/personas", token, {
+    request<Persona>("/me/personas", getToken, {
       method: "POST",
       body: JSON.stringify(body),
     }),
 
   updatePersona: (
-    token: string,
+    getToken: () => Promise<string | null>,
     id: string,
     body: {
       name?: string;
@@ -263,28 +287,28 @@ export const api = {
       is_active?: boolean;
     }
   ) =>
-    request<Persona>(`/me/personas/${id}`, token, {
+    request<Persona>(`/me/personas/${id}`, getToken, {
       method: "PUT",
       body: JSON.stringify(body),
     }),
 
-  deletePersona: (token: string, id: string) =>
-    request<void>(`/me/personas/${id}`, token, { method: "DELETE" }),
+  deletePersona: (getToken: () => Promise<string | null>, id: string) =>
+    request<void>(`/me/personas/${id}`, getToken, { method: "DELETE" }),
 
   createPersonaFromQuestionnaire: (
-    token: string,
+    getToken: () => Promise<string | null>,
     body: QuestionnairePayload
   ) =>
-    request<Persona>("/me/personas/questionnaire", token, {
+    request<Persona>("/me/personas/questionnaire", getToken, {
       method: "POST",
       body: JSON.stringify(body),
     }),
 
-  getCouncilConfig: (token: string) =>
-    request<CouncilConfig>("/me/config", token),
+  getCouncilConfig: (getToken: () => Promise<string | null>) =>
+    request<CouncilConfig>("/me/config", getToken),
 
   updateCouncilConfig: (
-    token: string,
+    getToken: () => Promise<string | null>,
     body: {
       num_agents?: number;
       num_rounds?: number;
@@ -292,7 +316,7 @@ export const api = {
       model?: string;
     }
   ) =>
-    request<CouncilConfig>("/me/config", token, {
+    request<CouncilConfig>("/me/config", getToken, {
       method: "PUT",
       body: JSON.stringify(body),
     }),
@@ -300,6 +324,18 @@ export const api = {
   health: () =>
     fetch(`${BASE}/health`).then((r) => r.json()) as Promise<{ status: string }>,
 
-  getSandboxStream: (token: string, runId: string) =>
-    request<{ stream_url: string }>(`/runs/${runId}/sandbox/stream`, token),
+  getSandboxStream: (getToken: () => Promise<string | null>, runId: string) =>
+    request<{ stream_url: string }>(`/runs/${runId}/sandbox/stream`, getToken),
+
+  listApiKeys: (getToken: () => Promise<string | null>) =>
+    request<ApiKey[]>("/me/api-keys", getToken),
+
+  createApiKey: (getToken: () => Promise<string | null>, body: { name?: string }) =>
+    request<ApiKeyCreated>("/me/api-keys", getToken, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  revokeApiKey: (getToken: () => Promise<string | null>, keyId: string) =>
+    request<void>(`/me/api-keys/${keyId}`, getToken, { method: "DELETE" }),
 };

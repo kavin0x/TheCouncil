@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
+import { UserButton } from "@clerk/nextjs";
 import { useQuery } from "@tanstack/react-query";
 import { api, type Entitlements } from "@/lib/api";
 import { Badge } from "@/components/ui";
@@ -41,12 +42,12 @@ function tierBadgeVariant(tier: string) {
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { token, logout } = useAuth();
+  const { getToken, logout } = useAuth();
 
   const { data: ent } = useQuery<Entitlements>({
     queryKey: ["entitlements"],
-    queryFn: () => api.getEntitlements(token!),
-    enabled: !!token,
+    queryFn: () => api.getEntitlements(getToken),
+    enabled: true,
   });
 
   return (
@@ -84,6 +85,7 @@ export function Sidebar() {
               <Link
                 key={href}
                 href={href}
+                aria-current={active ? "page" : undefined}
                 className={cn(
                   "group flex items-center gap-2.5 rounded px-3 py-2 text-sm transition-colors",
                   active
@@ -108,13 +110,22 @@ export function Sidebar() {
 
       {/* Footer */}
       <div className="border-t border-zinc-800/60 p-2">
-        <button
-          onClick={logout}
-          className="flex w-full items-center gap-2.5 rounded px-3 py-2 text-xs text-zinc-600 hover:bg-zinc-800/60 hover:text-red-400 transition-colors"
-        >
-          <LogOut className="h-3.5 w-3.5" />
-          Sign out
-        </button>
+        <div className="flex items-center gap-2.5 px-3 py-2">
+          <UserButton
+            appearance={{
+              elements: {
+                avatarBox: "h-6 w-6",
+              },
+            }}
+          />
+          <button
+            onClick={logout}
+            className="flex flex-1 items-center gap-2 text-xs text-zinc-600 hover:text-red-400 transition-colors"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+            Sign out
+          </button>
+        </div>
         <div className="mt-1 flex items-center gap-3 px-3 py-1">
           <Link href="/legal#tos" className="text-[10px] text-zinc-700 hover:text-zinc-500 transition-colors">
             Terms

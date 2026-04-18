@@ -13,22 +13,23 @@ import {
   CardHeader,
   CardTitle,
   Progress,
+  QueryError,
   Skeleton,
 } from "@/components/ui";
 import { formatRelative, statusColor } from "@/lib/utils";
 
-function useDashboard(token: string) {
+function useDashboard(getToken: () => Promise<string | null>) {
   const ent = useQuery<Entitlements>({
     queryKey: ["entitlements"],
-    queryFn: () => api.getEntitlements(token),
+    queryFn: () => api.getEntitlements(getToken),
   });
   const usage = useQuery<Usage>({
     queryKey: ["usage"],
-    queryFn: () => api.getUsage(token),
+    queryFn: () => api.getUsage(getToken),
   });
   const runs = useQuery<Run[]>({
     queryKey: ["runs"],
-    queryFn: () => api.listRuns(token),
+    queryFn: () => api.listRuns(getToken),
     select: (data) => data.slice(0, 5),
   });
   return { ent, usage, runs };
@@ -47,15 +48,33 @@ function tierBadgeVariant(tier: string) {
 }
 
 export default function DashboardPage() {
-  const { token } = useAuth();
-  const { ent, usage, runs } = useDashboard(token!);
+  const { getToken } = useAuth();
+  const { ent, usage, runs } = useDashboard(getToken);
 
   const runsUsed = usage.data?.runs.used ?? 0;
   const runsLimit = usage.data?.runs.limit ?? 1;
   const pct = Math.min(100, Math.round((runsUsed / runsLimit) * 100));
 
+  const loadError = ent.error || usage.error || runs.error;
+  const refetchAll = () => {
+    void ent.refetch();
+    void usage.refetch();
+    void runs.refetch();
+  };
+  const isRefetching =
+    (ent.isFetching && !ent.isLoading) ||
+    (usage.isFetching && !usage.isLoading) ||
+    (runs.isFetching && !runs.isLoading);
+
   return (
     <div className="space-y-6">
+      {loadError && (
+        <QueryError
+          message="We couldn&apos;t load your dashboard. Check your connection and try again."
+          onRetry={refetchAll}
+          isRetrying={isRefetching}
+        />
+      )}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-white">Dashboard</h1>
         <Link href="/runs">

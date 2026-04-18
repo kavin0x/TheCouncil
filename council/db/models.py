@@ -268,3 +268,38 @@ class UsageEvent(Base):
     deliberation: "Deliberation | None" = relationship(
         "Deliberation", back_populates="usage_events"
     )
+
+
+# ---------------------------------------------------------------------------
+# API Key
+# ---------------------------------------------------------------------------
+
+
+class ApiKey(Base):
+    """A user-generated API key for programmatic access."""
+
+    __tablename__ = "api_keys"
+
+    id: str = Column(String(36), primary_key=True, default=_uuid)
+    # Clerk user ID (e.g. "user_2xyz...")
+    owner_id: str = Column(String(255), nullable=False, index=True)
+    # Human label e.g. "My CLI key"
+    name: str = Column(String(100), nullable=False, default="Default")
+    # sha256 hex digest of the plaintext key — never store plaintext
+    key_hash: str = Column(String(64), nullable=False, unique=True, index=True)
+    # First 12 chars of plaintext for display (e.g. "tc_live_a1b2")
+    key_prefix: str = Column(String(16), nullable=False)
+    created_at: float = Column(Float, nullable=False, default=_now)
+    last_used_at: float | None = Column(Float, nullable=True)
+    is_active: bool = Column(Boolean, nullable=False, default=True)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "key_id": self.id,
+            "owner_id": self.owner_id,
+            "name": self.name,
+            "key_prefix": self.key_prefix,
+            "created_at": self.created_at,
+            "last_used_at": self.last_used_at,
+            "is_active": self.is_active,
+        }

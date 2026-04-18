@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { api } from "@/lib/api";
 
 const TOKEN = "test_token";
+const getToken = async () => TOKEN;
 
 function mockFetch(data: unknown, status = 200) {
   return vi.spyOn(global, "fetch").mockResolvedValueOnce({
@@ -17,7 +18,7 @@ describe("api.getEntitlements", () => {
 
   it("calls /me/entitlements with Bearer token", async () => {
     const spy = mockFetch({ tier: "pro", display_name: "Pro", limits: {}, features: {} });
-    await api.getEntitlements(TOKEN);
+    await api.getEntitlements(getToken);
     expect(spy).toHaveBeenCalledWith(
       expect.stringContaining("/me/entitlements"),
       expect.objectContaining({
@@ -34,7 +35,7 @@ describe("api.listRuns", () => {
 
   it("returns an array of runs", async () => {
     mockFetch([{ run_id: "abc", question: "Q?", status: "completed", created_at: 0 }]);
-    const runs = await api.listRuns(TOKEN);
+    const runs = await api.listRuns(getToken);
     expect(Array.isArray(runs)).toBe(true);
     expect(runs[0].run_id).toBe("abc");
   });
@@ -45,7 +46,7 @@ describe("api.createRun", () => {
 
   it("posts to /runs with question", async () => {
     const spy = mockFetch({ run_id: "xyz", question: "Test?", status: "pending", created_at: 0 }, 202);
-    const run = await api.createRun(TOKEN, { question: "Test?" });
+    const run = await api.createRun(getToken, { question: "Test?" });
     expect(spy).toHaveBeenCalledWith(
       expect.stringContaining("/runs"),
       expect.objectContaining({ method: "POST" })
@@ -59,7 +60,7 @@ describe("api.createRun", () => {
       status: 429,
       json: async () => ({ detail: "Monthly run limit reached" }),
     } as Response);
-    await expect(api.createRun(TOKEN, { question: "Q" })).rejects.toMatchObject({
+    await expect(api.createRun(getToken, { question: "Q" })).rejects.toMatchObject({
       status: 429,
     });
   });
@@ -74,7 +75,7 @@ describe("api.deletePersona", () => {
       status: 204,
       json: async () => null,
     } as Response);
-    const result = await api.deletePersona(TOKEN, "persona-id");
+    const result = await api.deletePersona(getToken, "persona-id");
     expect(result).toBeUndefined();
   });
 });

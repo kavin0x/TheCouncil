@@ -480,6 +480,39 @@ export const ToastClose = React.forwardRef<
 ToastClose.displayName = ToastPrimitive.Close.displayName;
 
 // ---------------------------------------------------------------------------
+// Query error (TanStack Query)
+// ---------------------------------------------------------------------------
+
+export function QueryError({
+  message,
+  onRetry,
+  isRetrying,
+}: {
+  message: string;
+  onRetry: () => void;
+  isRetrying?: boolean;
+}) {
+  return (
+    <div
+      className="flex flex-col gap-3 rounded border border-red-500/25 bg-red-950/25 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+      role="alert"
+    >
+      <p className="text-sm text-red-200">{message}</p>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="shrink-0 border-red-500/40 text-red-100 hover:bg-red-950/50 hover:text-white"
+        onClick={onRetry}
+        disabled={isRetrying}
+      >
+        {isRetrying ? "Retrying…" : "Retry"}
+      </Button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Tooltip
 // ---------------------------------------------------------------------------
 export const TooltipProvider = TooltipPrimitive.Provider;

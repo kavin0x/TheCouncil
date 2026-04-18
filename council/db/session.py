@@ -11,6 +11,7 @@ a real Postgres instance.
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from dotenv import load_dotenv
@@ -53,8 +54,24 @@ def get_engine():
     return _engine
 
 
-async def get_session() -> AsyncGenerator[AsyncSession, None]:
+async def get_session_dep() -> AsyncGenerator[AsyncSession, None]:
     """FastAPI dependency that yields a database session."""
+    if _session_factory is None:
+        raise RuntimeError(
+            "DATABASE_URL is not configured. "
+            "Set it in .env or the environment before starting the server."
+        )
+    async with _session_factory() as session:
+        yield session
+
+
+# Keep the old name as an alias for backward compatibility with existing Depends() usages.
+get_session = get_session_dep
+
+
+@asynccontextmanager
+async def get_session_ctx():
+    """Async context manager for a database session (for use outside FastAPI dependency injection)."""
     if _session_factory is None:
         raise RuntimeError(
             "DATABASE_URL is not configured. "

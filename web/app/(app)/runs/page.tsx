@@ -84,7 +84,7 @@ function ToggleSwitch({
 }
 
 function CreateRunDialog({ entitlements }: { entitlements?: Entitlements }) {
-  const { token } = useAuth();
+  const { getToken } = useAuth();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [question, setQuestion] = useState("");
@@ -102,7 +102,7 @@ function CreateRunDialog({ entitlements }: { entitlements?: Entitlements }) {
 
   const create = useMutation({
     mutationFn: () =>
-      api.createRun(token!, {
+      api.createRun(getToken, {
         question,
         config: { num_agents: parseInt(agents), num_rounds: parseInt(rounds) },
         web_search_enabled: webSearchEnabled,
@@ -113,9 +113,9 @@ function CreateRunDialog({ entitlements }: { entitlements?: Entitlements }) {
       qc.invalidateQueries({ queryKey: ["usage"] });
 
       // If computer use was enabled, fetch the VNC stream URL to display it.
-      if (computerUseEnabled && token) {
+      if (computerUseEnabled) {
         try {
-          const { stream_url } = await api.getSandboxStream(token, run.run_id);
+          const { stream_url } = await api.getSandboxStream(getToken, run.run_id);
           setSandboxStreamUrl(stream_url);
         } catch (err) {
           // Sandbox may still be spinning up — close the dialog and let the user
@@ -333,15 +333,15 @@ function CreateRunDialog({ entitlements }: { entitlements?: Entitlements }) {
 }
 
 export default function RunsPage() {
-  const { token } = useAuth();
+  const { getToken } = useAuth();
   const runs = useQuery<Run[]>({
     queryKey: ["runs"],
-    queryFn: () => api.listRuns(token!),
+    queryFn: () => api.listRuns(getToken),
     refetchInterval: 5000,
   });
   const ent = useQuery<Entitlements>({
     queryKey: ["entitlements"],
-    queryFn: () => api.getEntitlements(token!),
+    queryFn: () => api.getEntitlements(getToken),
   });
 
   const exportEnabled = ent.data?.features ? true : false;

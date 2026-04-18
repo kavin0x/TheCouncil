@@ -1159,17 +1159,17 @@ function QuestionnaireWizard({
 // ---- Council Configuration Panel ----
 
 function CouncilConfigPanel() {
-  const { token } = useAuth();
+  const { getToken } = useAuth();
   const qc = useQueryClient();
 
   const config = useQuery<CouncilConfig>({
     queryKey: ["council-config"],
-    queryFn: () => api.getCouncilConfig(token!),
+    queryFn: () => api.getCouncilConfig(getToken),
   });
 
   const personas = useQuery<Persona[]>({
     queryKey: ["personas"],
-    queryFn: () => api.listPersonas(token!),
+    queryFn: () => api.listPersonas(getToken),
   });
 
   const updateConfig = useMutation({
@@ -1177,7 +1177,7 @@ function CouncilConfigPanel() {
       num_agents?: number;
       num_rounds?: number;
       selected_persona_ids?: string[];
-    }) => api.updateCouncilConfig(token!, body),
+    }) => api.updateCouncilConfig(getToken, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["council-config"] }),
   });
 
@@ -1458,7 +1458,7 @@ function sourceBadge(source: string | null) {
 }
 
 export default function PersonasPage() {
-  const { token } = useAuth();
+  const { getToken } = useAuth();
   const qc = useQueryClient();
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [editPersona, setEditPersona] = useState<Persona | null>(null);
@@ -1468,12 +1468,12 @@ export default function PersonasPage() {
 
   const personas = useQuery<Persona[]>({
     queryKey: ["personas"],
-    queryFn: () => api.listPersonas(token!),
+    queryFn: () => api.listPersonas(getToken),
   });
 
   const ent = useQuery<Entitlements>({
     queryKey: ["entitlements"],
-    queryFn: () => api.getEntitlements(token!),
+    queryFn: () => api.getEntitlements(getToken),
     staleTime: Infinity,
   });
 
@@ -1484,7 +1484,7 @@ export default function PersonasPage() {
 
   const create = useMutation({
     mutationFn: (d: PersonaFormData) =>
-      api.createPersona(token!, {
+      api.createPersona(getToken, {
         ...d,
         mbti: d.mbti || undefined,
         job_role: d.job_role || undefined,
@@ -1499,7 +1499,7 @@ export default function PersonasPage() {
 
   const update = useMutation({
     mutationFn: (d: PersonaFormData) =>
-      api.updatePersona(token!, editPersona!.persona_id, {
+      api.updatePersona(getToken, editPersona!.persona_id, {
         ...d,
         mbti: d.mbti || undefined,
         job_role: d.job_role || undefined,
@@ -1511,7 +1511,7 @@ export default function PersonasPage() {
   });
 
   const del = useMutation({
-    mutationFn: (id: string) => api.deletePersona(token!, id),
+    mutationFn: (id: string) => api.deletePersona(getToken, id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["personas"] });
       setDeleteId(null);
@@ -1520,13 +1520,13 @@ export default function PersonasPage() {
 
   const toggleActive = useMutation({
     mutationFn: ({ id, is_active }: { id: string; is_active: boolean }) =>
-      api.updatePersona(token!, id, { is_active }),
+      api.updatePersona(getToken, id, { is_active }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["personas"] }),
   });
 
   const questionnaireGen = useMutation({
     mutationFn: (payload: QuestionnairePayload) =>
-      api.createPersonaFromQuestionnaire(token!, payload),
+      api.createPersonaFromQuestionnaire(getToken, payload),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["personas"] });
       setViewMode("list");
