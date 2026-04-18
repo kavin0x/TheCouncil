@@ -26,19 +26,11 @@ export default function LoginPage() {
           <span className="text-base font-semibold text-white">TheCouncil</span>
         </Link>
 
-<<<<<<< HEAD
         {!isLoaded && (
           <div className="flex justify-center">
             <div className="h-5 w-5 animate-spin rounded-full border-2 border-violet-500 border-t-transparent" />
           </div>
         )}
-=======
-        <div className="rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-7">
-          <h1 className="mb-1 text-xl font-bold text-white">Sign in</h1>
-          <p className="mb-6 text-sm text-zinc-400">
-            Enter your API key to access your council dashboard.
-          </p>
->>>>>>> 3f6717fcbcb894c5fc2ec6a2ac985bd82cbb7780
 
         {isLoaded && !isSignedIn && (
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-7">
