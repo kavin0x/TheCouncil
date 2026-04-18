@@ -4,7 +4,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Bot,
-  ChevronRight,
   Gauge,
   Key,
   LogOut,
@@ -20,12 +19,12 @@ import { api, type Entitlements } from "@/lib/api";
 import { Badge } from "@/components/ui";
 
 const navItems = [
-  { href: "/dashboard",    label: "Dashboard",      icon: Gauge },
-  { href: "/runs",         label: "Runs",           icon: Play },
-  { href: "/personas",     label: "Personas",       icon: Bot },
+  { href: "/dashboard",    label: "Dashboard",       icon: Gauge },
+  { href: "/runs",         label: "Runs",            icon: Play },
+  { href: "/personas",     label: "Personas",        icon: Bot },
   { href: "/usage",        label: "Usage & Billing", icon: BarChart3 },
-  { href: "/settings",     label: "Settings",       icon: Key },
-  { href: "/integrations", label: "Integrations",   icon: Puzzle },
+  { href: "/settings",     label: "Settings",        icon: Key },
+  { href: "/integrations", label: "Integrations",    icon: Puzzle },
 ];
 
 function tierBadgeVariant(tier: string) {
@@ -53,8 +52,8 @@ export function Sidebar() {
   return (
     <aside className="flex h-screen w-52 shrink-0 flex-col border-r border-zinc-800/60 bg-[#0a0d12]">
       {/* Brand */}
-      <div className="flex h-12 items-center gap-2.5 border-b border-zinc-800/60 px-4">
-        <div className="flex h-6 w-6 items-center justify-center rounded bg-violet-600 font-mono text-[10px] font-bold text-white">
+      <div className="flex h-14 items-center gap-2.5 border-b border-zinc-800/60 px-4">
+        <div className="flex h-6 w-6 items-center justify-center rounded-md bg-violet-600 font-mono text-[10px] font-bold text-white shadow-sm shadow-violet-500/30">
           TC
         </div>
         <span className="text-sm font-semibold tracking-tight text-white">
@@ -64,7 +63,7 @@ export function Sidebar() {
 
       {/* Tier badge */}
       {ent && (
-        <div className="border-b border-zinc-800/60 px-4 py-2.5">
+        <div className="border-b border-zinc-800/60 px-4 py-3">
           <Badge variant={tierBadgeVariant(ent.tier)}>
             {ent.display_name}
           </Badge>
@@ -87,10 +86,10 @@ export function Sidebar() {
                 href={href}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "group flex items-center gap-2.5 rounded px-3 py-2 text-sm transition-colors",
+                  "group flex items-center gap-2.5 rounded-md py-2 text-sm transition-colors",
                   active
-                    ? "bg-violet-600/10 text-violet-300"
-                    : "text-zinc-500 hover:bg-zinc-800/60 hover:text-zinc-200"
+                    ? "border-l-2 border-violet-500 bg-violet-600/10 pl-[10px] pr-3 text-violet-300"
+                    : "border-l-2 border-transparent pl-[10px] pr-3 text-zinc-500 hover:bg-zinc-800/60 hover:text-zinc-200"
                 )}
               >
                 <Icon
@@ -100,9 +99,6 @@ export function Sidebar() {
                   )}
                 />
                 <span className="flex-1 text-xs">{label}</span>
-                {active && (
-                  <ChevronRight className="h-3 w-3 text-violet-500/60" />
-                )}
               </Link>
             );
           })}
@@ -110,6 +106,7 @@ export function Sidebar() {
 
       {/* Footer */}
       <div className="border-t border-zinc-800/60 p-2">
+<<<<<<< HEAD
         <div className="flex items-center gap-2.5 px-3 py-2">
           <UserButton
             appearance={{
@@ -126,6 +123,15 @@ export function Sidebar() {
             Sign out
           </button>
         </div>
+=======
+        <button
+          onClick={logout}
+          className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-xs text-zinc-600 hover:bg-zinc-800/60 hover:text-red-400 transition-colors"
+        >
+          <LogOut className="h-3.5 w-3.5" />
+          Sign out
+        </button>
+>>>>>>> 3f6717fcbcb894c5fc2ec6a2ac985bd82cbb7780
         <div className="mt-1 flex items-center gap-3 px-3 py-1">
           <Link href="/legal#tos" className="text-[10px] text-zinc-700 hover:text-zinc-500 transition-colors">
             Terms

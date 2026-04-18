@@ -72,13 +72,19 @@ export default function SettingsPage() {
         <CardHeader>
           <CardTitle>API Keys</CardTitle>
           <CardDescription>
+<<<<<<< HEAD
             Use these keys in the{" "}
             <code className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-violet-300">
+=======
+            Use this key in the Authorization header:{" "}
+            <code className="rounded-md bg-zinc-800 px-1.5 py-0.5 text-xs text-violet-300">
+>>>>>>> 3f6717fcbcb894c5fc2ec6a2ac985bd82cbb7780
               Authorization: Bearer &lt;key&gt;
             </code>{" "}
             header for programmatic or CLI access.
           </CardDescription>
         </CardHeader>
+<<<<<<< HEAD
         <CardContent className="space-y-4">
           {newKey && (
             <div className="rounded-lg border border-amber-700/50 bg-amber-900/10 p-4 space-y-2">
@@ -160,6 +166,33 @@ export default function SettingsPage() {
             <Plus className="h-3.5 w-3.5" />
             {createKey.isPending ? "Generating…" : "Generate new key"}
           </Button>
+=======
+        <CardContent className="space-y-3">
+          <div className="flex items-center gap-2 rounded-lg border border-zinc-700/80 bg-zinc-800/40 px-3 py-2.5">
+            <span className="flex-1 break-all font-mono text-sm tracking-wide text-zinc-300">
+              {token ? (show ? token : maskKey(token)) : "—"}
+            </span>
+            <button
+              onClick={() => setShow((s) => !s)}
+              className="shrink-0 text-zinc-500 hover:text-white transition-colors"
+              title={show ? "Hide key" : "Show key"}
+            >
+              {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+            <button
+              onClick={copy}
+              className="shrink-0 text-zinc-500 hover:text-white transition-colors"
+              title="Copy to clipboard"
+            >
+              <Copy className="h-4 w-4" />
+            </button>
+          </div>
+          {copied && <p className="text-xs text-emerald-400">Copied to clipboard.</p>}
+          <p className="text-xs text-zinc-600">
+            This key is stored in your browser&apos;s local storage. Keep it secret.
+            Rotation requires a new key from your API dashboard.
+          </p>
+>>>>>>> 3f6717fcbcb894c5fc2ec6a2ac985bd82cbb7780
         </CardContent>
       </Card>
 
@@ -188,7 +221,7 @@ export default function SettingsPage() {
               {ent.data?.display_name ?? "—"}
             </Badge>
           </div>
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
             {[
               ["Runs / month", ent.data?.limits.runs_per_month],
               ["Max agents", ent.data?.limits.max_agents],
@@ -199,7 +232,7 @@ export default function SettingsPage() {
               ],
             ].map(([label, val]) => (
               <div key={String(label)}>
-                <dt className="text-zinc-500 text-xs">{label}</dt>
+                <dt className="text-xs text-zinc-500">{label}</dt>
                 <dd className="text-zinc-200">{String(val ?? "—")}</dd>
               </div>
             ))}
@@ -209,10 +242,19 @@ export default function SettingsPage() {
 
       <Separator />
 
-      {/* Danger zone */}
+      {/* Session */}
       <div className="space-y-2">
         <p className="text-sm font-medium text-zinc-400">Session</p>
+<<<<<<< HEAD
         <Button variant="outline" size="sm" onClick={logout} className="gap-2 text-red-400 border-red-900 hover:bg-red-950">
+=======
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleLogout}
+          className="gap-2 text-red-400 hover:bg-red-950/40 hover:text-red-300"
+        >
+>>>>>>> 3f6717fcbcb894c5fc2ec6a2ac985bd82cbb7780
           <LogOut className="h-4 w-4" /> Sign out
         </Button>
       </div>

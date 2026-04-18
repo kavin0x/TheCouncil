@@ -248,7 +248,8 @@ class TestTierGatedFeatures:
     async def test_web_search_on_basic_tier_returns_403(self, monkeypatch):
         """Basic tier cannot enable web search; server must reject with 403."""
         monkeypatch.setenv("DEFAULT_SUBSCRIPTION_TIER", "basic")
-        import importlib, sys
+        import importlib
+        import sys
         if "council.api.app" in sys.modules:
             importlib.reload(sys.modules["council.api.app"])
         from council.api.app import app as api_app
@@ -267,7 +268,8 @@ class TestTierGatedFeatures:
     async def test_computer_use_on_pro_tier_returns_403(self, monkeypatch):
         """Pro tier cannot enable computer use; server must reject with 403."""
         monkeypatch.setenv("DEFAULT_SUBSCRIPTION_TIER", "pro")
-        import importlib, sys
+        import importlib
+        import sys
         if "council.api.app" in sys.modules:
             importlib.reload(sys.modules["council.api.app"])
         from council.api.app import app as api_app
@@ -286,7 +288,8 @@ class TestTierGatedFeatures:
     async def test_web_search_on_pro_tier_succeeds(self, monkeypatch):
         """Pro tier can enable web search — the run should be created (202)."""
         monkeypatch.setenv("DEFAULT_SUBSCRIPTION_TIER", "pro")
-        import importlib, sys
+        import importlib
+        import sys
         if "council.api.app" in sys.modules:
             importlib.reload(sys.modules["council.api.app"])
         from council.api.app import app as api_app
@@ -306,7 +309,8 @@ class TestTierGatedFeatures:
     async def test_entitlements_includes_web_search_flag(self, monkeypatch):
         """Entitlements response must include web_search_enabled for the current tier."""
         monkeypatch.setenv("DEFAULT_SUBSCRIPTION_TIER", "pro")
-        import importlib, sys
+        import importlib
+        import sys
         if "council.api.app" in sys.modules:
             importlib.reload(sys.modules["council.api.app"])
         from council.api.app import app as api_app
@@ -323,7 +327,8 @@ class TestTierGatedFeatures:
     async def test_sandbox_stream_requires_ultra(self, monkeypatch):
         """Basic tier trying to access sandbox stream must get 403."""
         monkeypatch.setenv("DEFAULT_SUBSCRIPTION_TIER", "basic")
-        import importlib, sys
+        import importlib
+        import sys
         if "council.api.app" in sys.modules:
             importlib.reload(sys.modules["council.api.app"])
         from council.api.app import app as api_app

@@ -142,7 +142,7 @@ export default function UsagePage() {
 
       {/* Usage section */}
       <section className="space-y-4">
-        <h2 className="text-base font-semibold text-zinc-200">Current usage</h2>
+        <h2 className="text-sm font-semibold uppercase tracking-widest text-zinc-600">Current usage</h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <Card>
             <CardHeader>
@@ -155,7 +155,7 @@ export default function UsagePage() {
                 <>
                   <div className="flex justify-between text-sm">
                     <span className="text-zinc-400">{runsUsed} used</span>
-                    <span className="text-zinc-400">{runsLimit} limit</span>
+                    <span className="text-zinc-500">{runsLimit} limit</span>
                   </div>
                   <Progress value={pct} />
                   {pct >= 90 && (
@@ -200,7 +200,7 @@ export default function UsagePage() {
 
       {/* Ultra sandbox demo */}
       <section className="space-y-4">
-        <h2 className="text-base font-semibold text-zinc-200">Computer-use sandbox</h2>
+        <h2 className="text-sm font-semibold uppercase tracking-widest text-zinc-600">Computer-use sandbox</h2>
         <Card>
           <CardHeader>
             <CardTitle>Ultra sandbox demo</CardTitle>
@@ -211,7 +211,7 @@ export default function UsagePage() {
               computer-use workflows.
             </p>
             {computerUseEnabled ? (
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex flex-wrap items-center gap-2">
                 <Button
                   onClick={() => sandboxRun.mutate()}
                   disabled={sandboxRun.isPending}
@@ -228,7 +228,7 @@ export default function UsagePage() {
                 )}
               </div>
             ) : (
-              <p className="text-sm text-zinc-500">
+              <p className="text-sm text-zinc-600">
                 Upgrade to Ultra to enable sandboxed computer-use features.
               </p>
             )}
@@ -238,13 +238,13 @@ export default function UsagePage() {
 
       {/* Billing section */}
       <section className="space-y-4">
-        <h2 className="text-base font-semibold text-zinc-200">Billing</h2>
+        <h2 className="text-sm font-semibold uppercase tracking-widest text-zinc-600">Billing</h2>
         <Card>
           <CardContent className="pt-5">
             {billing.isLoading ? (
               <Skeleton className="h-16 w-full" />
             ) : (
-              <div className="flex items-center justify-between gap-4 flex-wrap">
+              <div className="flex flex-wrap items-center justify-between gap-4">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-semibold text-white">
@@ -290,10 +290,12 @@ export default function UsagePage() {
               <Card
                 key={tier.value}
                 className={
-                  tier.popular ? "border-violet-500/50 ring-1 ring-violet-500/20" : ""
+                  tier.popular
+                    ? "border-violet-500/50 shadow-md shadow-violet-500/10 ring-1 ring-violet-500/20"
+                    : ""
                 }
               >
-                <CardContent className="pt-5 flex flex-col gap-3">
+                <CardContent className="flex flex-col gap-3 pt-5">
                   {tier.popular && (
                     <Badge variant="default" className="self-start">Most popular</Badge>
                   )}
@@ -307,13 +309,13 @@ export default function UsagePage() {
                   <ul className="space-y-1.5 text-xs text-zinc-400">
                     {tier.perks.map((p) => (
                       <li key={p} className="flex items-center gap-1.5">
-                        <Check className="h-3 w-3 text-emerald-400 shrink-0" />
+                        <Check className="h-3 w-3 shrink-0 text-emerald-400" />
                         {p}
                       </li>
                     ))}
                   </ul>
                   <Button
-                    variant={tier.popular ? "default" : "outline"}
+                    variant={isCurrent ? "secondary" : tier.popular ? "default" : "outline"}
                     size="sm"
                     disabled={isCurrent || checkout.isPending}
                     onClick={() => !isCurrent && checkout.mutate(tier.value)}
@@ -327,7 +329,7 @@ export default function UsagePage() {
           })}
         </div>
 
-        <p className="text-xs text-zinc-600 text-center">
+        <p className="text-center text-xs text-zinc-600">
           Enterprise pricing is per seat. Contact{" "}
           <a href="mailto:sales@thecouncil.ai" className="text-violet-400 hover:underline">
             sales@thecouncil.ai

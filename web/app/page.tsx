@@ -36,7 +36,7 @@ const DEMO_LINES = [
 
 function TerminalDemo() {
   return (
-    <div className="w-full overflow-hidden rounded-xl border border-zinc-800 bg-[#0a0d12] shadow-2xl">
+    <div className="w-full overflow-hidden rounded-xl border border-zinc-800 bg-[#0a0d12] shadow-2xl shadow-black/50">
       {/* window chrome */}
       <div className="flex items-center gap-2 border-b border-zinc-800 px-4 py-2.5">
         <span className="h-2.5 w-2.5 rounded-full bg-red-500/70" />
@@ -81,15 +81,15 @@ export default function LandingPage() {
     <div className="relative flex min-h-screen flex-col bg-[#070b0f]">
       {/* Nav */}
       <header className="sticky top-0 z-40 border-b border-zinc-800/50 bg-[#070b0f]/90 backdrop-blur-md">
-        <div className="mx-auto flex h-13 max-w-6xl items-center justify-between px-6">
+        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-6">
           <div className="flex items-center gap-2.5">
-            <div className="flex h-6 w-6 items-center justify-center rounded bg-violet-600 font-mono text-[10px] font-bold text-white">
+            <div className="flex h-6 w-6 items-center justify-center rounded-md bg-violet-600 font-mono text-[10px] font-bold text-white shadow-sm shadow-violet-500/30">
               TC
             </div>
             <span className="text-sm font-semibold tracking-tight text-white">
               TheCouncil
             </span>
-            <span className="hidden rounded border border-violet-500/30 bg-violet-600/10 px-1.5 py-0.5 text-[10px] font-medium text-violet-400 sm:block">
+            <span className="hidden rounded-md border border-violet-500/30 bg-violet-600/10 px-1.5 py-0.5 text-[10px] font-medium text-violet-400 sm:block">
               BETA
             </span>
           </div>
@@ -123,10 +123,17 @@ export default function LandingPage() {
       </header>
 
       {/* Hero */}
-      <section className="mx-auto w-full max-w-6xl px-6 py-20">
-        <div className="grid gap-12 lg:grid-cols-2 lg:items-center">
+      <section className="relative mx-auto w-full max-w-6xl px-6 py-20">
+        {/* Subtle radial glow behind headline */}
+        <div
+          className="pointer-events-none absolute left-0 top-0 h-[500px] w-[500px] opacity-20"
+          style={{
+            background: "radial-gradient(ellipse at 20% 40%, rgba(139,92,246,0.3) 0%, transparent 60%)",
+          }}
+        />
+        <div className="relative grid gap-12 lg:grid-cols-2 lg:items-center">
           <div>
-            <div className="mb-5 inline-flex items-center gap-2 rounded border border-zinc-700/60 bg-zinc-900/50 px-3 py-1.5">
+            <div className="mb-5 inline-flex items-center gap-2 rounded-md border border-zinc-700/60 bg-zinc-900/50 px-3 py-1.5">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
               <span className="font-mono text-[11px] text-zinc-400">
                 Multi-agent deliberation engine
@@ -141,9 +148,9 @@ export default function LandingPage() {
               one rigorous answer.
             </h1>
 
-            <p className="mb-8 text-base text-zinc-400 leading-relaxed max-w-lg">
+            <p className="mb-8 max-w-lg text-base leading-relaxed text-zinc-400">
               TheCouncil routes your question through a structured debate between
-              AI agents with distinct reasoning profiles, configurable personas, and customizble tool calling capabilities. 
+              AI agents with distinct reasoning profiles, configurable personas, and customizable tool calling capabilities.
               They argue, push back, and synthesise — so you get answers that have been stress-tested,
               not just generated.
             </p>
@@ -180,21 +187,21 @@ export default function LandingPage() {
       <section className="mx-auto w-full max-w-6xl px-6 pb-20">
         <div className="mb-8 flex items-center gap-3">
           <div className="h-px flex-1 bg-zinc-800" />
-          <span className="font-mono text-xs text-zinc-600 uppercase tracking-widest">
+          <span className="font-mono text-xs uppercase tracking-widest text-zinc-600">
             Capabilities
           </span>
           <div className="h-px flex-1 bg-zinc-800" />
         </div>
 
-        <div className="grid gap-px border border-zinc-800 sm:grid-cols-2 rounded-xl overflow-hidden">
+        <div className="grid gap-px overflow-hidden rounded-xl border border-zinc-800 sm:grid-cols-2">
           {capabilities.map(({ icon: Icon, label, desc }) => (
             <div
               key={label}
-              className="group bg-zinc-900/40 p-6 hover:bg-zinc-900/80 transition-colors"
+              className="group bg-zinc-900/40 p-6 transition-colors hover:bg-zinc-900/70"
             >
               <div className="mb-4 flex items-center gap-3">
-                <div className="flex h-8 w-8 items-center justify-center rounded bg-zinc-800 group-hover:bg-violet-600/15 transition-colors">
-                  <Icon className="h-4 w-4 text-zinc-400 group-hover:text-violet-400 transition-colors" />
+                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-zinc-800 transition-colors group-hover:bg-violet-600/15">
+                  <Icon className="h-4 w-4 text-zinc-400 transition-colors group-hover:text-violet-400" />
                 </div>
                 <span className="text-sm font-semibold text-white">{label}</span>
               </div>
@@ -206,8 +213,8 @@ export default function LandingPage() {
 
       {/* Bottom CTA */}
       <section className="mx-auto w-full max-w-6xl px-6 pb-24">
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900/30 p-10 text-center">
-          <p className="mb-2 font-mono text-xs text-zinc-600 uppercase tracking-widest">
+        <div className="rounded-xl border border-zinc-800 bg-gradient-to-b from-violet-950/10 to-zinc-900/20 p-10 text-center">
+          <p className="mb-2 font-mono text-xs uppercase tracking-widest text-zinc-600">
             Get started
           </p>
           <h2 className="mb-3 text-2xl font-bold text-white">

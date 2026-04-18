@@ -47,6 +47,10 @@ function CodeBlock({ code, lang = "json" }: { code: string; lang?: string }) {
 }
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "https://api.thecouncil.ai";
+const MCP_BASE =
+  typeof window !== "undefined"
+    ? window.location.origin
+    : process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
 function McpJsonSnippet({ apiKey }: { apiKey: string }) {
   const masked = apiKey.slice(0, 8) + "...";
@@ -54,7 +58,7 @@ function McpJsonSnippet({ apiKey }: { apiKey: string }) {
     {
       mcpServers: {
         thecouncil: {
-          url: `${API_BASE}/mcp`,
+          url: `${MCP_BASE}/mcp`,
           headers: {
             Authorization: `Bearer ${masked}`,
           },
@@ -82,7 +86,9 @@ export default function IntegrationsPage() {
   if (!mcpEnabled && !ent.isLoading) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center">
-        <Lock className="mb-4 h-10 w-10 text-zinc-600" />
+        <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-xl bg-zinc-800 ring-1 ring-zinc-700/60">
+          <Lock className="h-6 w-6 text-zinc-500" />
+        </div>
         <h1 className="mb-2 text-xl font-bold text-white">Integrations require Pro</h1>
         <p className="mb-6 max-w-sm text-sm text-zinc-400">
           MCP server access and IDE plugin integrations are available on Pro, Ultra, and Enterprise plans.
@@ -152,11 +158,10 @@ export default function IntegrationsPage() {
 
           <div className="text-sm text-zinc-500">
             <p className="font-medium text-zinc-300 mb-2">MCP server URL</p>
-            <CodeBlock code={`${API_BASE}/mcp`} lang="url" />
+            <CodeBlock code={`${MCP_BASE}/mcp`} lang="url" />
             <p className="mt-2 text-xs text-zinc-500">
-              Local dev: use <code className="rounded bg-zinc-800 px-1">NEXT_PUBLIC_API_BASE_URL=http://localhost:3000</code>{" "}
-              so this URL hits Next; <code className="rounded bg-zinc-800 px-1">app/mcp/[[...path]]/route.ts</code> proxies to the API and
-              forwards <code className="rounded bg-zinc-800 px-1">Authorization</code> (Next rewrites do not). Override the API origin with{" "}
+              Requests to <code className="rounded bg-zinc-800 px-1">app/mcp/[[...path]]/route.ts</code> are proxied to the API and the{" "}
+              <code className="rounded bg-zinc-800 px-1">Authorization</code> header is forwarded automatically. Override the API origin with{" "}
               <code className="rounded bg-zinc-800 px-1">MCP_PROXY_TARGET</code> if needed. Same <code className="rounded bg-zinc-800 px-1">Bearer</code> as REST.
             </p>
           </div>
@@ -189,7 +194,7 @@ ${JSON.stringify(
   {
     mcpServers: {
       thecouncil: {
-        url: `${API_BASE}/mcp`,
+        url: `${MCP_BASE}/mcp`,
         headers: { Authorization: "Bearer YOUR_API_KEY" },
       },
     },
@@ -258,10 +263,13 @@ ${JSON.stringify(
           </CardContent>
         </Card>
       ) : (
-        <Card className="opacity-60">
+        <Card className="opacity-50">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              Custom MCP registration <Lock className="h-4 w-4 text-zinc-500" />
+              Custom MCP registration
+              <span className="inline-flex items-center gap-1 rounded-md bg-zinc-800 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500 ring-1 ring-zinc-700/50">
+                <Lock className="h-2.5 w-2.5" /> Pro+
+              </span>
             </CardTitle>
             <CardDescription>Available on Pro and above.</CardDescription>
           </CardHeader>
