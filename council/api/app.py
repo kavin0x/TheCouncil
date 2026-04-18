@@ -31,6 +31,7 @@ Usage (dev):
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import hmac
 import json
@@ -40,6 +41,10 @@ import secrets
 import time
 import uuid
 from contextlib import asynccontextmanager
+from functools import lru_cache
+
+import jwt  # PyJWT
+from jwt import PyJWKClient
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +63,7 @@ from fastapi.responses import JSONResponse  # type: ignore
 from fastmcp import FastMCP
 from fastmcp.server.dependencies import get_http_request
 from fastmcp.utilities.lifespan import combine_lifespans
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from council.core.runner import CouncilRunBlockedError, run_council_for_api
 from council.realtime import emit_run_event, register_ws_broadcast
@@ -83,6 +88,7 @@ from council.models.subscriptions import (
     parse_webhook_event,
     resolve_tier_from_webhook,
 )
+from council.db.session import get_engine, get_session_ctx
 
 
 def _get_api_secret() -> str:
@@ -103,6 +109,68 @@ def _resolve_request_tier() -> TierName:
         return TierName(raw)
     except ValueError:
         return TierName.BASIC
+
+
+# ---------------------------------------------------------------------------
+# Clerk JWT verification
+# ---------------------------------------------------------------------------
+
+
+# Lazy singleton — fetches JWKS once per process and caches.
+@lru_cache(maxsize=1)
+def _get_jwks_client() -> "PyJWKClient | None":
+    issuer = os.getenv("CLERK_ISSUER_URL", "").rstrip("/")
+    if not issuer:
+        return None
+    return PyJWKClient(f"{issuer}/.well-known/jwks.json", cache_jwk_set=True, lifespan=3600)
+
+
+def _verify_clerk_jwt(token: str) -> str | None:
+    """Validate a Clerk JWT and return the Clerk user ID (sub claim), or None on failure."""
+    client = _get_jwks_client()
+    if client is None:
+        return None
+    try:
+        signing_key = client.get_signing_key_from_jwt(token)
+        issuer = os.getenv("CLERK_ISSUER_URL", "").rstrip("/")
+        data = jwt.decode(
+            token,
+            signing_key.key,
+            algorithms=["RS256"],
+            options={"require": ["exp", "sub", "iss"]},
+            issuer=issuer,
+        )
+        return data.get("sub")  # Clerk user ID
+    except Exception:
+        return None
+
+
+async def _verify_api_key(raw_key: str) -> str | None:
+    """Look up a hashed API key in the DB and return its owner_id, or None."""
+    from council.db.models import ApiKey as ApiKeyModel
+    from sqlalchemy import select
+
+    engine = get_engine()
+    if engine is None:
+        return None
+    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+    try:
+        async with get_session_ctx() as session:
+            result = await session.execute(
+                select(ApiKeyModel).where(
+                    ApiKeyModel.key_hash == key_hash,
+                    ApiKeyModel.is_active == True,  # noqa: E712
+                )
+            )
+            api_key = result.scalar_one_or_none()
+            if api_key is None:
+                return None
+            # Update last_used_at asynchronously (fire-and-forget style)
+            api_key.last_used_at = time.time()
+            await session.commit()
+            return api_key.owner_id
+    except Exception:
+        return None
 
 
 def _mcp_bearer_from_request() -> str | None:
@@ -171,7 +239,7 @@ app.add_middleware(
     allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With", "clerk-session-id"],
 )
 
 
@@ -212,19 +280,36 @@ async def add_rate_limit_headers(request: Request, call_next):  # type: ignore[t
     # Resolve tier and usage counts — best-effort; never block the response.
     try:
         token = auth_header[7:].strip()
-        try:
-            api_secret = _get_api_secret()
-        except RuntimeError:
-            return response
-        if not secrets.compare_digest(token, api_secret):
+
+        # Resolve owner_id using the same priority chain as get_current_user.
+        owner_id: str | None = None
+
+        # 1. Clerk JWT
+        if token.startswith("eyJ"):
+            owner_id = _verify_clerk_jwt(token)
+
+        # 2. DB-backed API key
+        if owner_id is None and token.startswith("tc_"):
+            owner_id = await _verify_api_key(token)
+
+        # 3. Dev fallback
+        if owner_id is None:
+            try:
+                api_secret = _get_api_secret()
+                if secrets.compare_digest(token, api_secret):
+                    owner_id = "dev"
+            except RuntimeError:
+                pass
+
+        if owner_id is None:
             return response
 
         tier = _resolve_request_tier()
         limits = get_tier(tier).limits
         runs_limit = limits.runs_per_month
 
-        # Count runs this month for the caller.  owner_id == token in dev/single-key mode.
-        all_runs = await run_store.list_runs(owner_id=token)
+        # Count runs this month for the caller.
+        all_runs = await run_store.list_runs(owner_id=owner_id)
         used = _count_runs_this_month(all_runs)
         remaining = max(0, runs_limit - used)
 
@@ -499,51 +584,65 @@ def _build_artifact_from_result(run_id: str, question: str, result: dict[str, An
 # ---------------------------------------------------------------------------
 
 
-async def require_auth(
-    authorization: Annotated[str | None, Header()] = None,
-) -> "AuthContext":
-    """Extract and validate the Bearer token from the Authorization header.
-
-    Returns the token (used as the owner_id for run scoping).
-    Raises HTTP 401 if the token is missing or invalid.
-    """
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or malformed Authorization header. Use 'Bearer <token>'.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    token = authorization.removeprefix("Bearer ").strip()
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Empty bearer token.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    try:
-        expected = _get_api_secret()
-    except RuntimeError as exc:
-        logger.error("API secret misconfiguration: %s", exc)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Server configuration error.",
-        ) from exc
-    if not secrets.compare_digest(token, expected):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid API token.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    return AuthContext(owner_id=token, tier=_resolve_request_tier())
-
-
-@dataclass(frozen=True)
-class AuthContext:
-    owner_id: str
+@dataclass
+class AuthenticatedUser:
+    user_id: str  # Clerk user ID or "api_key:<key_prefix>" or "dev"
     tier: TierName
 
+    @property
+    def owner_id(self) -> str:
+        """Backward-compatible alias for user_id."""
+        return self.user_id
 
-def require_tier(auth: AuthContext, minimum: TierName) -> None:
+
+# Keep AuthContext as an alias so existing code keeps working unchanged.
+AuthContext = AuthenticatedUser
+
+
+async def get_current_user(
+    authorization: Annotated[str | None, Header()] = None,
+) -> AuthenticatedUser:
+    """Resolve caller identity from Bearer token.
+
+    Priority:
+    1. Clerk JWT  (if CLERK_ISSUER_URL is set and token is a JWT)
+    2. User API key (tc_live_... stored hashed in DB)
+    3. API_SECRET_KEY dev fallback
+    """
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing credentials")
+
+    token = authorization[7:].strip()
+
+    # 1. Try Clerk JWT (JWTs always start with "eyJ")
+    if token.startswith("eyJ"):
+        user_id = _verify_clerk_jwt(token)
+        if user_id:
+            return AuthenticatedUser(user_id=user_id, tier=_resolve_request_tier())
+        # Invalid JWT — fall through to API key check (could be a different JWT-like string)
+
+    # 2. Try DB-backed API key
+    if token.startswith("tc_"):
+        owner_id = await _verify_api_key(token)
+        if owner_id:
+            return AuthenticatedUser(user_id=owner_id, tier=_resolve_request_tier())
+
+    # 3. Dev fallback: compare against API_SECRET_KEY
+    try:
+        api_secret = _get_api_secret()
+        if secrets.compare_digest(token, api_secret):
+            return AuthenticatedUser(user_id="dev", tier=_resolve_request_tier())
+    except RuntimeError:
+        pass
+
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+
+# Keep require_auth as an alias for backward compatibility with any internal callers.
+require_auth = get_current_user
+
+
+def require_tier(auth: AuthenticatedUser, minimum: TierName) -> None:
     """Raise HTTP 403 if the authenticated user's tier is below *minimum*.
 
     Tier order: trial < basic < pro < ultra < enterprise.
@@ -576,10 +675,26 @@ def _count_runs_this_month(runs: list[Run]) -> int:
 # ---------------------------------------------------------------------------
 
 
+class CreateRunConfig(BaseModel):
+    """Run configuration for ``POST /runs``. Known keys are validated; others pass through."""
+
+    model_config = ConfigDict(extra="allow")
+
+    num_agents: int | None = Field(None, ge=0, description="Agent count; tier limits enforced separately.")
+    num_rounds: int | None = Field(None, ge=0, le=12)
+    rounds: int | None = Field(None, ge=0, le=12, description="Alias for num_rounds.")
+    selected_persona_ids: list[str] | None = None
+    model: str | None = Field(None, max_length=128)
+    max_input_tokens: int | None = Field(None, ge=0, le=2_000_000)
+    run_kind: str | None = Field(None, max_length=64)
+    sandbox_cmd: str | None = Field(None, max_length=16_384)
+    sandbox_timeout_s: int | None = Field(None, ge=10, le=7200)
+
+
 class CreateRunRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=4096, description="The debate question.")
-    config: dict[str, Any] = Field(
-        default_factory=dict,
+    config: CreateRunConfig = Field(
+        default_factory=CreateRunConfig,
         description="Optional run configuration forwarded to DebateSession.",
     )
     web_search_enabled: bool = Field(
@@ -642,7 +757,8 @@ async def create_run(
             ),
         )
 
-    requested_agents = int(body.config.get("num_agents", 0) or 0)
+    cfg = body.config.model_dump(mode="python", exclude_none=True)
+    requested_agents = int(cfg.get("num_agents", 0) or 0)
     if requested_agents and requested_agents > limits.max_agents:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -652,7 +768,7 @@ async def create_run(
             ),
         )
 
-    requested_rounds = int(body.config.get("num_rounds", 0) or 0)
+    requested_rounds = int(cfg.get("num_rounds", 0) or cfg.get("rounds", 0) or 0)
     if requested_rounds and requested_rounds > limits.max_rounds:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -662,7 +778,7 @@ async def create_run(
             ),
         )
 
-    requested_tokens = int(body.config.get("max_input_tokens", 0) or 0)
+    requested_tokens = int(cfg.get("max_input_tokens", 0) or 0)
     if requested_tokens and requested_tokens > limits.max_input_tokens:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -680,7 +796,7 @@ async def create_run(
         require_tier(auth, TierName.ULTRA)
 
     # Persist feature flags in the run config so the worker can read them.
-    run_config = dict(body.config)
+    run_config = dict(cfg)
     run_config["web_search_enabled"] = body.web_search_enabled
     run_config["computer_use_enabled"] = body.computer_use_enabled
 
@@ -1009,9 +1125,12 @@ async def create_portal(
 
     try:
         import stripe as _stripe  # type: ignore[import]
-    except ImportError as exc:
-        print("Stripe import failed in billing/portal endpoint (Perhaps not installed?)", exc)
-        raise HTTPException(status_code=503, detail="server side error (my bad, ill fix it)")
+    except ImportError:
+        logger.exception("Stripe SDK import failed in billing portal endpoint")
+        raise HTTPException(
+            status_code=503,
+            detail="Billing is temporarily unavailable. Please try again later.",
+        )
 
     session = _stripe.billing_portal.Session.create(
         customer=customer_id,
@@ -1410,6 +1529,133 @@ async def update_council_config(
             "max_rounds": limits.max_rounds,
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# API Key management
+# ---------------------------------------------------------------------------
+
+
+class ApiKeyCreate(BaseModel):
+    name: str = "Default"
+
+
+class ApiKeyResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    key_id: str
+    owner_id: str
+    name: str
+    key_prefix: str
+    created_at: float
+    last_used_at: float | None
+    is_active: bool
+
+
+class ApiKeyCreated(ApiKeyResponse):
+    """Includes plaintext key — returned only once at creation."""
+    plaintext_key: str
+
+
+@app.post("/me/api-keys", response_model=ApiKeyCreated, status_code=201)
+async def create_api_key(
+    body: ApiKeyCreate,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> ApiKeyCreated:
+    """Generate a new API key for the authenticated user. The plaintext key is returned only once."""
+    from council.db.models import ApiKey as ApiKeyModel
+
+    # Generate: "tc_live_" + 32 bytes hex = 72 chars total
+    raw = "tc_live_" + secrets.token_hex(32)
+    key_hash = hashlib.sha256(raw.encode()).hexdigest()
+    key_prefix = raw[:12]  # "tc_live_XXXX"
+
+    db_key = ApiKeyModel(
+        owner_id=user.user_id,
+        name=body.name,
+        key_hash=key_hash,
+        key_prefix=key_prefix,
+    )
+
+    engine = get_engine()
+    if engine is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    async with get_session_ctx() as session:
+        session.add(db_key)
+        await session.commit()
+        await session.refresh(db_key)
+
+    return ApiKeyCreated(
+        key_id=db_key.id,
+        owner_id=db_key.owner_id,
+        name=db_key.name,
+        key_prefix=db_key.key_prefix,
+        created_at=db_key.created_at,
+        last_used_at=db_key.last_used_at,
+        is_active=db_key.is_active,
+        plaintext_key=raw,
+    )
+
+
+@app.get("/me/api-keys", response_model=list[ApiKeyResponse])
+async def list_api_keys(
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> list[ApiKeyResponse]:
+    """List all active API keys for the authenticated user (no plaintext returned)."""
+    from council.db.models import ApiKey as ApiKeyModel
+    from sqlalchemy import select
+
+    engine = get_engine()
+    if engine is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    async with get_session_ctx() as session:
+        result = await session.execute(
+            select(ApiKeyModel)
+            .where(ApiKeyModel.owner_id == user.user_id, ApiKeyModel.is_active == True)  # noqa: E712
+            .order_by(ApiKeyModel.created_at.desc())
+        )
+        keys = result.scalars().all()
+
+    return [
+        ApiKeyResponse(
+            key_id=k.id,
+            owner_id=k.owner_id,
+            name=k.name,
+            key_prefix=k.key_prefix,
+            created_at=k.created_at,
+            last_used_at=k.last_used_at,
+            is_active=k.is_active,
+        )
+        for k in keys
+    ]
+
+
+@app.delete("/me/api-keys/{key_id}", status_code=204)
+async def revoke_api_key(
+    key_id: str,
+    user: AuthenticatedUser = Depends(get_current_user),
+) -> None:
+    """Revoke (soft-delete) an API key. Only the key owner can revoke it."""
+    from council.db.models import ApiKey as ApiKeyModel
+    from sqlalchemy import select
+
+    engine = get_engine()
+    if engine is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    async with get_session_ctx() as session:
+        result = await session.execute(
+            select(ApiKeyModel).where(
+                ApiKeyModel.id == key_id,
+                ApiKeyModel.owner_id == user.user_id,
+            )
+        )
+        api_key = result.scalar_one_or_none()
+        if api_key is None:
+            raise HTTPException(status_code=404, detail="API key not found")
+        api_key.is_active = False
+        await session.commit()
 
 
 # ---------------------------------------------------------------------------

@@ -13,6 +13,7 @@ import {
   CardHeader,
   CardTitle,
   Progress,
+  QueryError,
   Skeleton,
 } from "@/components/ui";
 
@@ -56,24 +57,24 @@ function validateStripeUrl(url: string): boolean {
 }
 
 export default function UsagePage() {
-  const { token } = useAuth();
+  const { getToken } = useAuth();
 
   const ent = useQuery<Entitlements>({
     queryKey: ["entitlements"],
-    queryFn: () => api.getEntitlements(token!),
+    queryFn: () => api.getEntitlements(getToken),
   });
   const usage = useQuery<Usage>({
     queryKey: ["usage"],
-    queryFn: () => api.getUsage(token!),
+    queryFn: () => api.getUsage(getToken),
     refetchInterval: 30_000,
   });
   const billing = useQuery<Billing>({
     queryKey: ["billing"],
-    queryFn: () => api.getBilling(token!),
+    queryFn: () => api.getBilling(getToken),
   });
 
   const portal = useMutation({
-    mutationFn: () => api.createPortal(token!, window.location.href),
+    mutationFn: () => api.createPortal(getToken, window.location.href),
     onSuccess: ({ url }) => {
       if (validateStripeUrl(url)) {
         window.location.assign(url);
@@ -85,7 +86,7 @@ export default function UsagePage() {
 
   const checkout = useMutation({
     mutationFn: (tier: string) =>
-      api.createCheckout(token!, {
+      api.createCheckout(getToken, {
         tier,
         success_url: `${window.location.origin}/dashboard`,
         cancel_url: window.location.href,
@@ -101,7 +102,7 @@ export default function UsagePage() {
 
   const sandboxRun = useMutation({
     mutationFn: () =>
-      api.createRun(token!, {
+      api.createRun(getToken, {
         question: "Sandbox demo: verify environment and return a readiness message.",
         config: {
           run_kind: "sandbox",
@@ -117,8 +118,26 @@ export default function UsagePage() {
 
   const computerUseEnabled = !!ent.data?.features.computer_use_enabled;
 
+  const loadError = ent.error || usage.error || billing.error;
+  const refetchAll = () => {
+    void ent.refetch();
+    void usage.refetch();
+    void billing.refetch();
+  };
+  const isRefetching =
+    (ent.isFetching && !ent.isLoading) ||
+    (usage.isFetching && !usage.isLoading) ||
+    (billing.isFetching && !billing.isLoading);
+
   return (
     <div className="space-y-8">
+      {loadError && (
+        <QueryError
+          message="We couldn&apos;t load billing or usage. Check your connection and try again."
+          onRetry={refetchAll}
+          isRetrying={isRefetching}
+        />
+      )}
       <h1 className="text-2xl font-bold text-white">Usage & Billing</h1>
 
       {/* Usage section */}

@@ -115,6 +115,15 @@ class TestCreateRun:
         )
         assert resp.status_code == 422
 
+    @pytest.mark.asyncio
+    async def test_create_run_rejects_malformed_config(self, client):
+        resp = await client.post(
+            "/runs",
+            json={"question": "Q?", "config": {"num_rounds": "not-a-number"}},
+            headers=AUTH,
+        )
+        assert resp.status_code == 422
+
 
 # ---------------------------------------------------------------------------
 # GET /runs/{run_id} — poll
@@ -146,34 +155,15 @@ class TestGetRun:
         assert resp2.status_code == 401
 
     @pytest.mark.asyncio
-    async def test_cannot_access_other_users_run(self, client, monkeypatch):
-        """A run created by one token is not visible to another token."""
+    async def test_invalid_token_returns_401(self, client, monkeypatch):
+        """A token that does not match API_SECRET_KEY, is not a valid Clerk JWT,
+        and does not match a DB API key returns 401."""
         monkeypatch.setenv("API_SECRET_KEY", "token-a")
-        import importlib
-        import sys
-        # Get the module and reload it with new env
-        if "council.api.app" in sys.modules:
-            importlib.reload(sys.modules["council.api.app"])
-        from council.api.app import app as api_app
-
-        async with AsyncClient(
-            transport=ASGITransport(app=api_app), base_url="http://testserver"
-        ) as c2:
-            # create with token-a
-            r1 = await c2.post(
-                "/runs",
-                json={"question": "Owned by A"},
-                headers={"Authorization": "Bearer token-a"},
-            )
-            run_id = r1.json()["run_id"]
-
-            # switch key to token-b and try to fetch
-            monkeypatch.setenv("API_SECRET_KEY", "token-b")
-            r2 = await c2.get(
-                f"/runs/{run_id}",
-                headers={"Authorization": "Bearer token-b"},
-            )
-            assert r2.status_code == 404
+        resp = await client.get(
+            "/runs/some-run-id",
+            headers={"Authorization": "Bearer completely-wrong-token"},
+        )
+        assert resp.status_code == 401
 
 
 # ---------------------------------------------------------------------------

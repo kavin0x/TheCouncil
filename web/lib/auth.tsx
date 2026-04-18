@@ -1,51 +1,41 @@
 "use client";
 
-import React, {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useState,
-} from "react";
-
-const STORAGE_KEY = "tc_api_key";
+import React, { createContext, useCallback, useContext } from "react";
+import { useAuth as useClerkAuth, useClerk } from "@clerk/nextjs";
 
 interface AuthCtx {
-  token: string | null;
-  login: (key: string) => void;
-  logout: () => void;
+  /** Get the current Clerk session JWT (refreshes automatically). Returns null if not signed in. */
+  getToken: () => Promise<string | null>;
+  /** True while Clerk is initialising. */
   isLoading: boolean;
+  /** Sign out of Clerk and clear session. */
+  logout: () => void;
 }
 
 const AuthContext = createContext<AuthCtx>({
-  token: null,
-  login: () => {},
-  logout: () => {},
+  getToken: async () => null,
   isLoading: true,
+  logout: () => {},
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [token, setToken] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const { isLoaded, getToken: clerkGetToken } = useClerkAuth();
+  const { signOut } = useClerk();
 
-  useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) setToken(stored);
-    setIsLoading(false);
-  }, []);
-
-  const login = useCallback((key: string) => {
-    localStorage.setItem(STORAGE_KEY, key);
-    setToken(key);
-  }, []);
+  const getToken = useCallback(async (): Promise<string | null> => {
+    try {
+      return await clerkGetToken();
+    } catch {
+      return null;
+    }
+  }, [clerkGetToken]);
 
   const logout = useCallback(() => {
-    localStorage.removeItem(STORAGE_KEY);
-    setToken(null);
-  }, []);
+    void signOut();
+  }, [signOut]);
 
   return (
-    <AuthContext.Provider value={{ token, login, logout, isLoading }}>
+    <AuthContext.Provider value={{ getToken, isLoading: !isLoaded, logout }}>
       {children}
     </AuthContext.Provider>
   );
