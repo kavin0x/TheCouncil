@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, Monitor, Plus, Search } from "lucide-react";
+import { Bot, Download, Monitor, Play, Plus, Search } from "lucide-react";
 import { api, type Entitlements, type Run } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import {
@@ -112,14 +112,16 @@ function CreateRunDialog({ entitlements }: { entitlements?: Entitlements }) {
       qc.invalidateQueries({ queryKey: ["runs"] });
       qc.invalidateQueries({ queryKey: ["usage"] });
 
+<<<<<<< HEAD
       // If computer use was enabled, fetch the VNC stream URL to display it.
       if (computerUseEnabled) {
+=======
+      if (computerUseEnabled && token) {
+>>>>>>> 3f6717fcbcb894c5fc2ec6a2ac985bd82cbb7780
         try {
           const { stream_url } = await api.getSandboxStream(getToken, run.run_id);
           setSandboxStreamUrl(stream_url);
         } catch (err) {
-          // Sandbox may still be spinning up — close the dialog and let the user
-          // navigate to the run detail page to retry.
           console.warn("Sandbox stream URL unavailable");
           if (process.env.NODE_ENV === "development") console.error(err);
           setError("Run started, but the sandbox stream could not be fetched yet. Check the run status page.");
@@ -181,7 +183,7 @@ function CreateRunDialog({ entitlements }: { entitlements?: Entitlements }) {
                 href={sandboxStreamUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="block truncate rounded border border-zinc-700 bg-zinc-800/60 px-3 py-2 text-xs text-violet-300 hover:underline"
+                className="block truncate rounded-md border border-zinc-700 bg-zinc-800/60 px-3 py-2 text-xs text-violet-300 hover:underline"
               >
                 {sandboxStreamUrl}
               </a>
@@ -192,7 +194,7 @@ function CreateRunDialog({ entitlements }: { entitlements?: Entitlements }) {
                 </summary>
                 <iframe
                   src={sandboxStreamUrl}
-                  className="mt-2 h-64 w-full rounded border border-zinc-700"
+                  className="mt-2 h-64 w-full rounded-md border border-zinc-700"
                   title="E2B Desktop sandbox"
                   sandbox="allow-scripts allow-same-origin allow-forms"
                 />
@@ -216,7 +218,7 @@ function CreateRunDialog({ entitlements }: { entitlements?: Entitlements }) {
                   onChange={(e) => setQuestion(e.target.value)}
                   maxLength={4096}
                 />
-                <p className="text-right text-xs text-zinc-500">{question.length}/4096</p>
+                <p className="text-right text-xs text-zinc-600">{question.length}/4096</p>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -253,7 +255,7 @@ function CreateRunDialog({ entitlements }: { entitlements?: Entitlements }) {
               </div>
 
               {/* ── Feature toggles ─────────────────────────────────── */}
-              <div className="space-y-2 rounded-lg border border-zinc-800 bg-zinc-900/40 px-4 py-3">
+              <div className="space-y-3 rounded-lg border border-zinc-800 bg-zinc-900/40 px-4 py-3">
                 {/* Web Search toggle */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -357,7 +359,10 @@ export default function RunsPage() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle>All runs</CardTitle>
-            <p className="text-xs text-zinc-500">Auto-refreshes every 5s</p>
+            <div className="flex items-center gap-1.5 text-xs text-zinc-600">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500/60" />
+              Auto-refreshes every 5s
+            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -369,30 +374,32 @@ export default function RunsPage() {
             </div>
           ) : runs.data?.length === 0 ? (
             <div className="py-10 text-center">
-              <p className="mb-2 text-sm text-zinc-400">No runs yet.</p>
-              <p className="text-xs text-zinc-600">
-                Click &ldquo;New run&rdquo; to start your first council debate.
+              <Bot className="mx-auto mb-3 h-8 w-8 text-zinc-700 opacity-60" />
+              <p className="mb-1 text-sm text-zinc-400">No runs yet.</p>
+              <p className="mb-4 text-xs text-zinc-600">
+                Start your first council debate to see results here.
               </p>
+              <CreateRunDialog entitlements={ent.data} />
             </div>
           ) : (
-            <div className="divide-y divide-zinc-800">
+            <div className="divide-y divide-zinc-800/60">
               {runs.data?.map((run) => (
                 <div
                   key={run.run_id}
-                  className="flex items-start gap-3 py-3.5"
+                  className="group flex items-start gap-3 py-3.5"
                 >
-                  <div className="flex-1 min-w-0">
+                  <div className="min-w-0 flex-1">
                     <Link
                       href={`/runs/${run.run_id}`}
-                      className="text-sm text-white hover:text-violet-300 transition-colors line-clamp-2"
+                      className="text-sm text-white transition-colors hover:text-violet-300 line-clamp-2"
                     >
                       {run.question}
                     </Link>
-                    <p className="mt-0.5 text-xs text-zinc-500">
-                      {formatRelative(run.created_at)} · {run.run_id.slice(0, 8)}
+                    <p className="mt-0.5 text-xs text-zinc-600">
+                      {formatRelative(run.created_at)} · <span className="font-mono">{run.run_id.slice(0, 8)}</span>
                     </p>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex shrink-0 items-center gap-2">
                     <Badge variant={runBadgeVariant(run.status)}>{run.status}</Badge>
                     {run.status === "completed" && (
                       exportEnabled ? (

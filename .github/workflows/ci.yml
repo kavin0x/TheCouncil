@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: write
 
     steps:
       - name: Checkout code
@@ -27,25 +28,85 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run tests
-        run: pytest tests/ -q --tb=short
+        id: tests
+        continue-on-error: true
+        run: pytest tests/ -q --tb=short 2>&1 | tee /tmp/pytest-output.txt; exit "${PIPESTATUS[0]}"
         env:
           API_SECRET_KEY: "test-secret-key"
 
       - name: Lint with Ruff
+        id: lint
+        continue-on-error: true
         run: |
           pip install ruff
-          ruff check .
+          ruff check . 2>&1 | tee /tmp/ruff-output.txt; exit "${PIPESTATUS[0]}"
 
       - name: Security scan (pip-audit)
+        id: audit
+        continue-on-error: true
         run: |
           pip install pip-audit
-          pip-audit --requirement requirements.txt --skip-editable
+          # CVE-2026-25990: pillow transitive via e2b-desktop, which pins pillow<12.0.0.
+          # No compatible fix available until e2b-desktop relaxes its constraint.
+          pip-audit --requirement requirements.txt --skip-editable --ignore-vuln CVE-2026-25990 2>&1 | tee /tmp/audit-output.txt; exit "${PIPESTATUS[0]}"
+
+      - name: Comment on PR with failures
+        if: >
+          github.event_name == 'pull_request' &&
+          (steps.tests.outcome == 'failure' ||
+           steps.lint.outcome == 'failure' ||
+           steps.audit.outcome == 'failure')
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            const readOutput = (path) => {
+              try { return fs.readFileSync(path, 'utf8').trim(); }
+              catch { return '(no output captured)'; }
+            };
+
+            let sections = [];
+
+            if ('${{ steps.tests.outcome }}' === 'failure') {
+              const out = readOutput('/tmp/pytest-output.txt');
+              sections.push(`### Test failures\n\`\`\`\n${out.slice(-4000)}\n\`\`\``);
+            }
+            if ('${{ steps.lint.outcome }}' === 'failure') {
+              const out = readOutput('/tmp/ruff-output.txt');
+              sections.push(`### Lint failures (ruff)\n\`\`\`\n${out.slice(-4000)}\n\`\`\``);
+            }
+            if ('${{ steps.audit.outcome }}' === 'failure') {
+              const out = readOutput('/tmp/audit-output.txt');
+              sections.push(`### Security scan failures (pip-audit)\n\`\`\`\n${out.slice(-4000)}\n\`\`\``);
+            }
+
+            const body = [
+              '@claude The **Python — Test & Lint** CI check failed. Please fix the issues below.',
+              '',
+              ...sections,
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+
+      - name: Fail job if any check failed
+        if: >
+          steps.tests.outcome == 'failure' ||
+          steps.lint.outcome == 'failure' ||
+          steps.audit.outcome == 'failure'
+        run: exit 1
 
   web:
     name: Web — Lint, Typecheck & Test
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      pull-requests: write
     defaults:
       run:
         working-directory: web
@@ -65,17 +126,82 @@ jobs:
         run: npm ci
 
       - name: Lint
-        run: npm run lint
+        id: lint
+        continue-on-error: true
+        run: npm run lint 2>&1 | tee /tmp/eslint-output.txt; exit "${PIPESTATUS[0]}"
 
       - name: Type-check
-        run: npm run typecheck
+        id: typecheck
+        continue-on-error: true
+        run: npm run typecheck 2>&1 | tee /tmp/tsc-output.txt; exit "${PIPESTATUS[0]}"
 
       - name: Unit tests
-        run: npm run test
+        id: tests
+        continue-on-error: true
+        run: npm run test 2>&1 | tee /tmp/vitest-output.txt; exit "${PIPESTATUS[0]}"
         env:
           NEXT_PUBLIC_API_BASE_URL: "http://localhost:8000"
 
       - name: Build
-        run: npm run build
+        id: build
+        continue-on-error: true
+        run: npm run build 2>&1 | tee /tmp/build-output.txt; exit "${PIPESTATUS[0]}"
         env:
           NEXT_PUBLIC_API_BASE_URL: "http://localhost:8000"
+
+      - name: Comment on PR with failures
+        if: >
+          github.event_name == 'pull_request' &&
+          (steps.lint.outcome == 'failure' ||
+           steps.typecheck.outcome == 'failure' ||
+           steps.tests.outcome == 'failure' ||
+           steps.build.outcome == 'failure')
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            const readOutput = (path) => {
+              try { return fs.readFileSync(path, 'utf8').trim(); }
+              catch { return '(no output captured)'; }
+            };
+
+            let sections = [];
+
+            if ('${{ steps.lint.outcome }}' === 'failure') {
+              const out = readOutput('/tmp/eslint-output.txt');
+              sections.push(`### Lint failures (ESLint)\n\`\`\`\n${out.slice(-4000)}\n\`\`\``);
+            }
+            if ('${{ steps.typecheck.outcome }}' === 'failure') {
+              const out = readOutput('/tmp/tsc-output.txt');
+              sections.push(`### Type-check failures (tsc)\n\`\`\`\n${out.slice(-4000)}\n\`\`\``);
+            }
+            if ('${{ steps.tests.outcome }}' === 'failure') {
+              const out = readOutput('/tmp/vitest-output.txt');
+              sections.push(`### Test failures (Vitest)\n\`\`\`\n${out.slice(-4000)}\n\`\`\``);
+            }
+            if ('${{ steps.build.outcome }}' === 'failure') {
+              const out = readOutput('/tmp/build-output.txt');
+              sections.push(`### Build failures\n\`\`\`\n${out.slice(-4000)}\n\`\`\``);
+            }
+
+            const body = [
+              '@claude The **Web — Lint, Typecheck & Test** CI check failed. Please fix the issues below.',
+              '',
+              ...sections,
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+
+      - name: Fail job if any check failed
+        if: >
+          steps.lint.outcome == 'failure' ||
+          steps.typecheck.outcome == 'failure' ||
+          steps.tests.outcome == 'failure' ||
+          steps.build.outcome == 'failure'
+        run: exit 1

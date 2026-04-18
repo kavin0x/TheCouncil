@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Check, Minus } from "lucide-react";
-import { Button } from "@/components/ui";
+import { Badge, Button } from "@/components/ui";
 
 interface Tier {
   name: string;
@@ -122,7 +122,7 @@ function FeatureValue({ value }: { value: string | boolean }) {
     return value ? (
       <Check className="mx-auto h-4 w-4 text-emerald-400" />
     ) : (
-      <Minus className="mx-auto h-4 w-4 text-zinc-600" />
+      <Minus className="mx-auto h-4 w-4 text-zinc-700" />
     );
   }
   return <span className="text-sm text-zinc-300">{value}</span>;
@@ -130,12 +130,12 @@ function FeatureValue({ value }: { value: string | boolean }) {
 
 export default function PricingPage() {
   return (
-    <div className="min-h-screen bg-zinc-950 px-4 pb-24">
+    <div className="min-h-screen bg-[#070b0f] px-4 pb-24">
       {/* Nav */}
-      <header className="sticky top-0 z-40 border-b border-zinc-800/60 bg-zinc-950/80 backdrop-blur">
+      <header className="sticky top-0 z-40 border-b border-zinc-800/60 bg-[#070b0f]/90 backdrop-blur-md">
         <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-6">
           <Link href="/" className="flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-600 text-white text-xs font-bold">
+            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-violet-600 text-xs font-bold text-white shadow-sm shadow-violet-500/30">
               TC
             </div>
             <span className="text-sm font-semibold text-white">TheCouncil</span>
@@ -159,15 +159,15 @@ export default function PricingPage() {
           {tiers.map((tier) => (
             <div
               key={tier.name}
-              className={`flex flex-col rounded-2xl border p-5 ${
+              className={`flex flex-col rounded-xl border p-5 transition-colors ${
                 tier.highlighted
-                  ? "border-violet-500/60 bg-violet-950/20 ring-1 ring-violet-500/20"
-                  : "border-zinc-800 bg-zinc-900/40"
+                  ? "border-violet-500/50 bg-violet-950/20 shadow-lg shadow-violet-500/10 ring-1 ring-violet-500/20"
+                  : "border-zinc-800 bg-zinc-900/40 hover:border-zinc-700/80"
               }`}
             >
               {tier.highlighted && (
-                <div className="mb-3 self-start rounded-full bg-violet-600 px-2.5 py-0.5 text-xs font-semibold text-white">
-                  Most popular
+                <div className="mb-3 self-start">
+                  <Badge variant="default">Most popular</Badge>
                 </div>
               )}
               <h2 className="text-lg font-bold text-white">{tier.name}</h2>
@@ -177,7 +177,7 @@ export default function PricingPage() {
                   <span className="text-sm text-zinc-500">{tier.priceNote}</span>
                 )}
               </div>
-              <p className="mt-2 text-sm text-zinc-400 leading-relaxed">{tier.description}</p>
+              <p className="mt-2 text-sm leading-relaxed text-zinc-400">{tier.description}</p>
               <Link href={tier.ctaHref} className="mt-4">
                 <Button
                   className="w-full"
