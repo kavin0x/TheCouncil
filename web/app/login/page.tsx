@@ -27,8 +27,12 @@ export default function LoginPage() {
         </Link>
 
         {!isLoaded && (
-          <div className="flex justify-center">
-            <div className="h-5 w-5 animate-spin rounded-full border-2 border-violet-500 border-t-transparent" />
+          <div className="flex justify-center" role="status" aria-busy="true">
+            <div
+              className="h-5 w-5 animate-spin rounded-full border-2 border-violet-500 border-t-transparent"
+              aria-hidden="true"
+            />
+            <span className="sr-only">Loading sign-in options</span>
           </div>
         )}
 
