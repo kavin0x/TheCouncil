@@ -106,7 +106,6 @@ export function Sidebar() {
 
       {/* Footer */}
       <div className="border-t border-zinc-800/60 p-2">
-<<<<<<< HEAD
         <div className="flex items-center gap-2.5 px-3 py-2">
           <UserButton
             appearance={{
@@ -123,15 +122,6 @@ export function Sidebar() {
             Sign out
           </button>
         </div>
-=======
-        <button
-          onClick={logout}
-          className="flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-xs text-zinc-600 hover:bg-zinc-800/60 hover:text-red-400 transition-colors"
-        >
-          <LogOut className="h-3.5 w-3.5" />
-          Sign out
-        </button>
->>>>>>> 3f6717fcbcb894c5fc2ec6a2ac985bd82cbb7780
         <div className="mt-1 flex items-center gap-3 px-3 py-1">
           <Link href="/legal#tos" className="text-[10px] text-zinc-700 hover:text-zinc-500 transition-colors">
             Terms

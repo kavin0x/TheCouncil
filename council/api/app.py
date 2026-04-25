@@ -41,18 +41,15 @@ import secrets
 import time
 import uuid
 from contextlib import asynccontextmanager
-<<<<<<< HEAD
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from functools import lru_cache
+from typing import Annotated, Any
 
 import jwt  # PyJWT
 from jwt import PyJWKClient
 
 logger = logging.getLogger(__name__)
-=======
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Annotated, Any
->>>>>>> 3f6717fcbcb894c5fc2ec6a2ac985bd82cbb7780
 
 from dotenv import load_dotenv
 
@@ -65,25 +62,11 @@ from fastapi.responses import JSONResponse  # noqa: E402  # type: ignore
 from fastmcp import FastMCP  # noqa: E402
 from fastmcp.server.dependencies import get_http_request  # noqa: E402
 from fastmcp.utilities.lifespan import combine_lifespans  # noqa: E402
-from pydantic import BaseModel, Field  # noqa: E402
-
-<<<<<<< HEAD
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect, status  # type: ignore
-from fastapi.middleware.cors import CORSMiddleware  # type: ignore
-from fastapi.responses import JSONResponse  # type: ignore
-from fastmcp import FastMCP
-from fastmcp.server.dependencies import get_http_request
-from fastmcp.utilities.lifespan import combine_lifespans
 from pydantic import BaseModel, ConfigDict, Field
 
 from council.core.runner import CouncilRunBlockedError, run_council_for_api
 from council.realtime import emit_run_event, register_ws_broadcast
 from council.models.state import (
-=======
-from council.core.runner import CouncilRunBlockedError, run_council_for_api  # noqa: E402
-from council.realtime import emit_run_event, register_ws_broadcast  # noqa: E402
-from council.models.state import (  # noqa: E402
->>>>>>> 3f6717fcbcb894c5fc2ec6a2ac985bd82cbb7780
     Run,
     RunNotFoundError,
     RunStatus,
@@ -188,10 +171,9 @@ async def _verify_api_key(raw_key: str) -> str | None:
     try:
         async with get_session_ctx() as session:
             result = await session.execute(
-                select(ApiKeyModel).where(
-                    ApiKeyModel.key_hash == key_hash,
-                    ApiKeyModel.is_active == True,  # noqa: E712
-                )
+                select(ApiKeyModel)
+                .where(ApiKeyModel.__table__.c.key_hash == key_hash)
+                .where(ApiKeyModel.__table__.c.is_active.is_(True))
             )
             api_key = result.scalar_one_or_none()
             if api_key is None:
@@ -369,6 +351,7 @@ async def _run_worker_loop() -> None:
     while True:
         run_id = await run_queue.dequeue()
         t0 = time.monotonic()
+        run: Run | None = None
         try:
             run = await run_store.update_status(run_id, RunStatus.RUNNING)
             await emit_run_event(run_id, "run_started", {"run_id": run_id})
@@ -419,7 +402,7 @@ async def _run_worker_loop() -> None:
             )
         finally:
             # Kill the Desktop sandbox associated with this run when the run ends.
-            if (run.config or {}).get("computer_use_enabled"):
+            if run is not None and (run.config or {}).get("computer_use_enabled"):
                 await kill_desktop_sandbox(run_id)
             run_queue.task_done()
 
@@ -726,7 +709,7 @@ class CreateRunConfig(BaseModel):
 class CreateRunRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=4096, description="The debate question.")
     config: CreateRunConfig = Field(
-        default_factory=CreateRunConfig,
+        default_factory=CreateRunConfig.model_construct,
         description="Optional run configuration forwarded to DebateSession.",
     )
     web_search_enabled: bool = Field(
@@ -1648,8 +1631,9 @@ async def list_api_keys(
     async with get_session_ctx() as session:
         result = await session.execute(
             select(ApiKeyModel)
-            .where(ApiKeyModel.owner_id == user.user_id, ApiKeyModel.is_active == True)  # noqa: E712
-            .order_by(ApiKeyModel.created_at.desc())
+            .where(ApiKeyModel.__table__.c.owner_id == user.user_id)
+            .where(ApiKeyModel.__table__.c.is_active.is_(True))
+            .order_by(ApiKeyModel.__table__.c.created_at.desc())
         )
         keys = result.scalars().all()
 
@@ -1683,8 +1667,8 @@ async def revoke_api_key(
     async with get_session_ctx() as session:
         result = await session.execute(
             select(ApiKeyModel).where(
-                ApiKeyModel.id == key_id,
-                ApiKeyModel.owner_id == user.user_id,
+                ApiKeyModel.__table__.c.id == key_id,
+                ApiKeyModel.__table__.c.owner_id == user.user_id,
             )
         )
         api_key = result.scalar_one_or_none()
