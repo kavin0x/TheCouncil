@@ -434,11 +434,7 @@ export default function RunDetailPage({
     <div className="space-y-6">
       <div className="flex items-start gap-4">
         <Link href="/runs">
-<<<<<<< HEAD
           <Button size="icon" variant="ghost" aria-label="Back to runs">
-=======
-          <Button size="icon" variant="ghost" className="transition-transform hover:-translate-x-0.5">
->>>>>>> 3f6717fcbcb894c5fc2ec6a2ac985bd82cbb7780
             <ArrowLeft className="h-4 w-4" />
           </Button>
         </Link>

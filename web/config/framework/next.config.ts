@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import path from "path";
 
 const isDev = process.env.NODE_ENV === "development";
 
@@ -7,6 +8,9 @@ const scriptSrc = isDev
   : "script-src 'self' 'unsafe-inline'";
 
 const nextConfig: NextConfig = {
+  turbopack: {
+    root: path.join(__dirname, "../../"),
+  },
   async headers() {
     return [
       {

@@ -67,37 +67,30 @@ export default function SettingsPage() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-white">Settings</h1>
 
-      {/* API Keys */}
       <Card>
         <CardHeader>
           <CardTitle>API Keys</CardTitle>
           <CardDescription>
-<<<<<<< HEAD
             Use these keys in the{" "}
             <code className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-violet-300">
-=======
-            Use this key in the Authorization header:{" "}
-            <code className="rounded-md bg-zinc-800 px-1.5 py-0.5 text-xs text-violet-300">
->>>>>>> 3f6717fcbcb894c5fc2ec6a2ac985bd82cbb7780
               Authorization: Bearer &lt;key&gt;
             </code>{" "}
             header for programmatic or CLI access.
           </CardDescription>
         </CardHeader>
-<<<<<<< HEAD
         <CardContent className="space-y-4">
           {newKey && (
-            <div className="rounded-lg border border-amber-700/50 bg-amber-900/10 p-4 space-y-2">
+            <div className="space-y-2 rounded-lg border border-amber-700/50 bg-amber-900/10 p-4">
               <p className="text-xs font-medium text-amber-400">
                 Copy this now — you won&apos;t see it again.
               </p>
               <div className="flex items-center gap-2 rounded border border-zinc-700 bg-zinc-800/60 px-3 py-2">
-                <span className="flex-1 font-mono text-xs text-zinc-200 break-all">
+                <span className="flex-1 break-all font-mono text-xs text-zinc-200">
                   {newKey.plaintext_key}
                 </span>
                 <button
                   onClick={copyNewKey}
-                  className="shrink-0 text-zinc-400 hover:text-white transition-colors"
+                  className="shrink-0 text-zinc-400 transition-colors hover:text-white"
                 >
                   <Copy className="h-4 w-4" />
                 </button>
@@ -127,14 +120,12 @@ export default function SettingsPage() {
               {keysQuery.data?.map((k) => (
                 <div key={k.key_id} className="flex items-center gap-3 py-3">
                   <Key className="h-4 w-4 shrink-0 text-zinc-600" />
-                  <div className="flex-1 min-w-0">
+                  <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium text-zinc-200">{k.name}</span>
                       {!k.is_active && <Badge variant="danger">revoked</Badge>}
                     </div>
-                    <p className="font-mono text-xs text-zinc-500">
-                      {k.key_prefix}••••••••
-                    </p>
+                    <p className="font-mono text-xs text-zinc-500">{k.key_prefix}••••••••</p>
                     <p className="text-xs text-zinc-600">
                       Created {formatDate(k.created_at)}
                       {k.last_used_at ? ` · Last used ${formatDate(k.last_used_at)}` : ""}
@@ -166,37 +157,9 @@ export default function SettingsPage() {
             <Plus className="h-3.5 w-3.5" />
             {createKey.isPending ? "Generating…" : "Generate new key"}
           </Button>
-=======
-        <CardContent className="space-y-3">
-          <div className="flex items-center gap-2 rounded-lg border border-zinc-700/80 bg-zinc-800/40 px-3 py-2.5">
-            <span className="flex-1 break-all font-mono text-sm tracking-wide text-zinc-300">
-              {token ? (show ? token : maskKey(token)) : "—"}
-            </span>
-            <button
-              onClick={() => setShow((s) => !s)}
-              className="shrink-0 text-zinc-500 hover:text-white transition-colors"
-              title={show ? "Hide key" : "Show key"}
-            >
-              {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-            </button>
-            <button
-              onClick={copy}
-              className="shrink-0 text-zinc-500 hover:text-white transition-colors"
-              title="Copy to clipboard"
-            >
-              <Copy className="h-4 w-4" />
-            </button>
-          </div>
-          {copied && <p className="text-xs text-emerald-400">Copied to clipboard.</p>}
-          <p className="text-xs text-zinc-600">
-            This key is stored in your browser&apos;s local storage. Keep it secret.
-            Rotation requires a new key from your API dashboard.
-          </p>
->>>>>>> 3f6717fcbcb894c5fc2ec6a2ac985bd82cbb7780
         </CardContent>
       </Card>
 
-      {/* Subscription summary */}
       <Card>
         <CardHeader>
           <CardTitle>Subscription</CardTitle>
@@ -226,10 +189,7 @@ export default function SettingsPage() {
               ["Runs / month", ent.data?.limits.runs_per_month],
               ["Max agents", ent.data?.limits.max_agents],
               ["Max rounds", ent.data?.limits.max_rounds],
-              [
-                "Saved personas",
-                ent.data?.limits.max_saved_personas ?? "Unlimited",
-              ],
+              ["Saved personas", ent.data?.limits.max_saved_personas ?? "Unlimited"],
             ].map(([label, val]) => (
               <div key={String(label)}>
                 <dt className="text-xs text-zinc-500">{label}</dt>
@@ -242,19 +202,9 @@ export default function SettingsPage() {
 
       <Separator />
 
-      {/* Session */}
       <div className="space-y-2">
         <p className="text-sm font-medium text-zinc-400">Session</p>
-<<<<<<< HEAD
-        <Button variant="outline" size="sm" onClick={logout} className="gap-2 text-red-400 border-red-900 hover:bg-red-950">
-=======
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={handleLogout}
-          className="gap-2 text-red-400 hover:bg-red-950/40 hover:text-red-300"
-        >
->>>>>>> 3f6717fcbcb894c5fc2ec6a2ac985bd82cbb7780
+        <Button variant="outline" size="sm" onClick={logout} className="gap-2 border-red-900 text-red-400 hover:bg-red-950">
           <LogOut className="h-4 w-4" /> Sign out
         </Button>
       </div>

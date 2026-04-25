@@ -112,12 +112,8 @@ function CreateRunDialog({ entitlements }: { entitlements?: Entitlements }) {
       qc.invalidateQueries({ queryKey: ["runs"] });
       qc.invalidateQueries({ queryKey: ["usage"] });
 
-<<<<<<< HEAD
-      // If computer use was enabled, fetch the VNC stream URL to display it.
-      if (computerUseEnabled) {
-=======
-      if (computerUseEnabled && token) {
->>>>>>> 3f6717fcbcb894c5fc2ec6a2ac985bd82cbb7780
+  // If computer use was enabled, fetch the VNC stream URL to display it.
+  if (computerUseEnabled) {
         try {
           const { stream_url } = await api.getSandboxStream(getToken, run.run_id);
           setSandboxStreamUrl(stream_url);
