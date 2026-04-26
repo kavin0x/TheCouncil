@@ -34,8 +34,22 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="min-h-screen antialiased" suppressHydrationWarning>
-        <ClerkProvider>
+        <ClerkProvider
+          signInUrl="/login"
+          signUpUrl="/login"
+          signInFallbackRedirectUrl="/dashboard"
+          signUpFallbackRedirectUrl="/dashboard"
+        >
           <Providers>{children}</Providers>
+          <div className="border-t border-zinc-900 py-2 text-center">
+            <p className="px-4 font-mono text-[10px] text-zinc-700">
+              AI-generated outputs are for informational purposes only and do not constitute legal, medical, financial, or other professional advice. TheCouncil makes no warranties as to accuracy.{" "}
+              Use of this service constitutes acceptance of our{" "}
+              <a href="/legal#tos" className="underline underline-offset-2 hover:text-zinc-500 transition-colors">Terms</a>
+              {" "}and{" "}
+              <a href="/legal#privacy" className="underline underline-offset-2 hover:text-zinc-500 transition-colors">Privacy Policy</a>.
+            </p>
+          </div>
         </ClerkProvider>
       </body>
     </html>

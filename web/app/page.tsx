@@ -236,7 +236,7 @@ export default function LandingPage() {
         <div className="mx-auto max-w-6xl px-6">
           <div className="flex items-center justify-between">
             <span className="font-mono text-xs text-zinc-700">
-              © {new Date().getFullYear()} TheCouncil
+              © {new Date().getFullYear()} TheCouncil LLC
             </span>
             <div className="flex items-center gap-5 text-xs text-zinc-600">
               <Link href="/pricing" className="hover:text-zinc-400 transition-colors">
@@ -250,6 +250,11 @@ export default function LandingPage() {
               </Link>
             </div>
           </div>
+          <p className="mt-3 font-mono text-[10px] text-zinc-700">
+            AI-generated outputs are for informational purposes only and do not constitute legal, medical, financial, or other professional advice.
+            TheCouncil LLC makes no warranties as to accuracy. By using the service you agree to our{" "}
+            <Link href="/legal#tos" className="underline underline-offset-2 hover:text-zinc-500 transition-colors">Terms of Service</Link>.
+          </p>
         </div>
       </footer>
     </div>

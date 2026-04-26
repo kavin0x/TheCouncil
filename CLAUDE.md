@@ -21,7 +21,7 @@ pip install -r requirements.txt
 cp .env.example .env  # then populate secrets
 
 # Run API
-uvicorn council.api.app:app --reload
+uvicorn council.api.app:app --reload --reload-dir council --reload-dir tests --reload-exclude 'web/*' --reload-exclude 'node_modules/*' --reload-exclude '.next/*' --reload-exclude '.venv/*'
 
 # Run migrations
 python -m council.db.migrations

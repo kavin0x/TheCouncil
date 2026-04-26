@@ -25,7 +25,7 @@ Auth:
   for single-key dev mode, or against a user table in production.
 
 Usage (dev):
-  uvicorn council.api.app:app --reload
+    uvicorn council.api.app:app --reload --reload-dir council --reload-dir tests --reload-exclude 'web/*' --reload-exclude 'node_modules/*' --reload-exclude '.next/*' --reload-exclude '.venv/*'
 """
 
 from __future__ import annotations
