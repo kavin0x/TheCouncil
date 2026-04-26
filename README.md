@@ -25,7 +25,7 @@ pip install -r requirements.txt
 cp .env.example .env        # add keys
 
 # HTTP API (dev)
-uvicorn api:app --reload
+uvicorn api:app --reload --reload-dir council --reload-dir tests --reload-exclude 'web/*' --reload-exclude 'node_modules/*' --reload-exclude '.next/*' --reload-exclude '.venv/*'
 
 # MCP server (remote) is mounted at:
 #   http://localhost:3000/mcp  (Next.js frontend proxy → backend)
@@ -42,6 +42,8 @@ cd web
 npm ci
 npm run dev
 ```
+
+`npm run dev` now starts Next.js with a 4 GB heap cap (`--max-old-space-size=4096`) to prevent runaway memory usage from crashing the machine during development.
 
 Set `NEXT_PUBLIC_API_BASE_URL` to your API origin (see `web/.env` patterns in `.gitignore`).
 

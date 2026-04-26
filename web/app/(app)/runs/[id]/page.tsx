@@ -275,10 +275,10 @@ export default function RunDetailPage({
 
   const [feeds, setFeeds] = useState<Record<string, AgentFeed>>({});
   const [dmLog, setDmLog] = useState<string[]>([]);
-  const feedsRef = useRef(feeds);
-  useEffect(() => {
-    feedsRef.current = feeds;
-  }, [feeds]);
+  const wsRef = useRef<WebSocket | null>(null);
+  // Keep a ref to getToken so the WebSocket effect doesn't re-run on every Clerk token refresh.
+  const getTokenRef = useRef(getToken);
+  useEffect(() => { getTokenRef.current = getToken; }, [getToken]);
 
   const applyWsEvent = useCallback((msg: WsEvent) => {
     if (msg.type === "agents_announced" && msg.agents?.length) {
@@ -294,9 +294,10 @@ export default function RunDetailPage({
     if (msg.type === "agent_delta" && msg.agent && msg.delta) {
       setFeeds((prev) => {
         const cur = prev[msg.agent!] ?? { role: "", sections: [], streamBuf: "" };
+        const nextBuf = (cur.streamBuf + msg.delta!).slice(-20000);
         return {
           ...prev,
-          [msg.agent!]: { ...cur, streamBuf: cur.streamBuf + msg.delta! },
+          [msg.agent!]: { ...cur, streamBuf: nextBuf },
         };
       });
       return;
@@ -324,7 +325,7 @@ export default function RunDetailPage({
     }
     if (msg.type === "agent_dm" && msg.sender && msg.recipient) {
       const line = `${msg.sender} → ${msg.recipient}: ${msg.content ?? ""}`;
-      setDmLog((d) => [...d, line]);
+      setDmLog((d) => [...d, line].slice(-500));
     }
   }, []);
 
@@ -351,12 +352,17 @@ export default function RunDetailPage({
   useEffect(() => {
     if (!id || !live) return;
 
-    let ws: WebSocket | null = null;
+    let cancelled = false;
 
-    getToken().then((token) => {
-      if (!token) return;
+    // Ensure only one live socket exists for this page at a time.
+    wsRef.current?.close();
+    wsRef.current = null;
+
+    getTokenRef.current().then((token) => {
+      if (cancelled || !token) return;
       const url = wsUrlForRun(API_BASE, id, token);
-      ws = new WebSocket(url);
+      const ws = new WebSocket(url);
+      wsRef.current = ws;
 
       ws.onmessage = (ev) => {
         try {
@@ -366,12 +372,15 @@ export default function RunDetailPage({
           }
           if (msg.type === "run_snapshot" && msg.result && typeof msg.result === "object") {
             const r = msg.result as { agents?: { name: string; role: string }[] };
-            if (r.agents?.length && Object.keys(feedsRef.current).length === 0) {
-              const next: Record<string, AgentFeed> = {};
-              for (const a of r.agents) {
-                next[a.name] = { role: a.role, sections: [], streamBuf: "" };
-              }
-              setFeeds(next);
+            if (r.agents?.length) {
+              setFeeds((prev) => {
+                if (Object.keys(prev).length > 0) return prev;
+                const next: Record<string, AgentFeed> = {};
+                for (const a of r.agents!) {
+                  next[a.name] = { role: a.role, sections: [], streamBuf: "" };
+                }
+                return next;
+              });
             }
           }
           applyWsEvent(msg);
@@ -379,12 +388,30 @@ export default function RunDetailPage({
           /* ignore */
         }
       };
+
+      if (cancelled) {
+        ws.onmessage = null;
+        ws.onerror = null;
+        ws.onclose = null;
+        ws.close();
+      }
     });
 
     return () => {
-      ws?.close();
+      cancelled = true;
+      if (wsRef.current) {
+        wsRef.current.onmessage = null;
+        wsRef.current.onerror = null;
+        wsRef.current.onclose = null;
+        wsRef.current.close();
+        wsRef.current = null;
+      }
     };
-  }, [getToken, id, live, applyWsEvent, queryClient]);
+  }, [id, live, applyWsEvent, queryClient]);
+
+  useEffect(() => {
+    if (status === "completed") setFeeds({});
+  }, [status]);
 
   const displayFeeds = useMemo(() => {
     if (run.data?.status === "completed" && run.data.result) {
@@ -576,6 +603,10 @@ export default function RunDetailPage({
           </CardContent>
         </Card>
       )}
+
+      <p className="font-mono text-[10px] text-zinc-700">
+        AI-generated · For informational use only · Not legal, medical, or financial advice · Verify outputs before acting on them
+      </p>
 
       {r.error && (
         <Card>

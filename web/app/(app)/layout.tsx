@@ -26,6 +26,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <Sidebar />
       <main id="main-content" className="flex-1 overflow-y-auto" tabIndex={-1}>
         <div className="mx-auto max-w-4xl px-6 py-8">{children}</div>
+        <div className="border-t border-zinc-900 py-3 text-center">
+          <p className="px-4 font-mono text-[10px] text-zinc-700">
+            AI-generated outputs are for informational purposes only and do not constitute professional advice. TheCouncil LLC is not liable for decisions made based on these outputs.{" "}
+            <a href="/legal#tos" className="underline underline-offset-2 hover:text-zinc-500 transition-colors">Terms</a>
+            {" "}·{" "}
+            <a href="/legal#privacy" className="underline underline-offset-2 hover:text-zinc-500 transition-colors">Privacy</a>
+          </p>
+        </div>
       </main>
     </div>
   );

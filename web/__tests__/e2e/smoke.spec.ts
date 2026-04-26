@@ -22,16 +22,15 @@ test.describe("Marketing pages", () => {
 });
 
 test.describe("Login page", () => {
-  test("renders the API key input and sign-in button", async ({ page }) => {
+  test("renders Clerk sign-in UI", async ({ page }) => {
     await page.goto("/login");
-    await expect(page.getByLabel(/api key/i)).toBeVisible();
-    await expect(page.getByRole("button", { name: /sign in/i })).toBeVisible();
+    await expect(page.getByText(/securely sign in/i)).toBeVisible();
+    await expect(page.getByRole("button", { name: /continue/i })).toBeVisible();
   });
 
-  test("sign-in button is disabled with an empty key", async ({ page }) => {
+  test("does not render legacy API-key login controls", async ({ page }) => {
     await page.goto("/login");
-    const btn = page.getByRole("button", { name: /sign in/i });
-    await expect(btn).toBeDisabled();
+    await expect(page.getByLabel(/api key/i)).toHaveCount(0);
   });
 });
 

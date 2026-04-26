@@ -13,7 +13,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - `web/lib/auth.tsx` — `useAuth()` hook exposes `getToken`, `isLoading`, `logout`
   - `getToken()` returns a Clerk JWT for use as the API Bearer token
 - `web/lib/api.ts` — all `api.*` methods accept `getToken: () => Promise<string | null>` (NOT a raw string token)
-- Login page (`/login`) — redirects to Clerk sign-in; no API key form
+- Login page (`/login`) — renders Clerk `<SignIn />` and redirects successful auth to `/dashboard`; no API key form
 - Settings page (`/settings`) — API key management UI (generate/list/revoke `tc_live_...` keys)
 
 ### Required env vars
