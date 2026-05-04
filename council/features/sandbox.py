@@ -13,10 +13,53 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Sandbox command validation
+# ---------------------------------------------------------------------------
+
+_ALLOWED_SANDBOX_COMMANDS = frozenset({
+    "python", "python3", "node", "bash", "sh", "echo", "cat", "ls", "pwd",
+    "env", "printenv", "uname", "whoami", "date", "which", "head", "tail",
+    "wc", "sort", "uniq", "grep", "find", "curl", "wget", "pip", "pip3",
+    "npm", "npx", "java", "javac", "go", "ruby", "perl", "r",
+})
+
+# Shell metacharacters that allow command chaining or redirection
+_SHELL_METACHAR_RE = re.compile(r"[|;&`$<>{}()\n\r]|\$\(|&&|\|\|")
+
+
+def _validate_sandbox_cmd(cmd: str) -> str:
+    """Validate a sandbox command string against an allowlist and reject shell metacharacters.
+
+    Raises ValueError if the command is unsafe.
+    """
+    cmd = cmd.strip()
+    if not cmd:
+        return "python -c \"print('TheCouncil sandbox ready')\""
+
+    if _SHELL_METACHAR_RE.search(cmd):
+        raise ValueError(
+            "sandbox_cmd contains disallowed shell metacharacters. "
+            "Use a simple command without pipes, semicolons, redirects, or subshells."
+        )
+
+    base_command = cmd.split()[0].lower()
+    # Strip any path prefix (e.g., /usr/bin/python → python)
+    base_command = base_command.rsplit("/", 1)[-1]
+
+    if base_command not in _ALLOWED_SANDBOX_COMMANDS:
+        raise ValueError(
+            f"sandbox_cmd base command {base_command!r} is not in the allowed command list. "
+            f"Allowed: {', '.join(sorted(_ALLOWED_SANDBOX_COMMANDS))}"
+        )
+
+    return cmd
 
 # Desktop sandbox defaults (configurable via env if needed in future).
 _DESKTOP_RESOLUTION = (1024, 720)
@@ -140,8 +183,11 @@ async def run_sandbox_task(*, question: str, config: dict[str, Any] | None = Non
     cfg = config or {}
     start = time.monotonic()
 
-    # Small bounded demo command. (Optionally pass a URL in config in future.)
-    cmd = str(cfg.get("sandbox_cmd") or "python -c \"print('TheCouncil sandbox ready')\"")
+    raw_cmd = str(cfg.get("sandbox_cmd") or "")
+    try:
+        cmd = _validate_sandbox_cmd(raw_cmd)
+    except ValueError as exc:
+        raise ValueError(f"Invalid sandbox_cmd: {exc}") from exc
     timeout_s = int(cfg.get("sandbox_timeout_s") or 60)
 
     with Sandbox.create() as sb:

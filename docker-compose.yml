@@ -43,6 +43,7 @@ services:
       REDIS_URL: "redis://redis:6379/0"
       CELERY_BROKER_URL: "redis://redis:6379/1"
       CELERY_RESULT_BACKEND: "redis://redis:6379/1"
+      HIDE_DOCS: "${HIDE_DOCS:-1}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -51,7 +52,7 @@ services:
     command: >
       sh -c "
         python -m council.db.migrations &&
-        uvicorn council.api.app:app --host 0.0.0.0 --port 8000
+        uvicorn council.api.app:app --host 0.0.0.0 --port 8000 --workers ${UVICORN_WORKERS:-4}
       "
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]

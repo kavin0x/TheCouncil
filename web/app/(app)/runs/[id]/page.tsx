@@ -19,13 +19,12 @@ import { formatDate } from "@/lib/utils";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
-function wsUrlForRun(base: string, runId: string, token: string): string {
+function wsUrlForRun(base: string, runId: string): string {
   const trimmed = base.replace(/\/$/, "");
   const wsBase = trimmed.startsWith("https")
     ? trimmed.replace(/^https/, "wss")
     : trimmed.replace(/^http/, "ws");
-  // TODO: Security - move token to WebSocket subprotocol or post-connect auth message
-  return `${wsBase}/ws/${encodeURIComponent(runId)}?token=${encodeURIComponent(token)}`;
+  return `${wsBase}/ws/${encodeURIComponent(runId)}`;
 }
 
 type AgentFeed = {
@@ -360,8 +359,9 @@ export default function RunDetailPage({
 
     getTokenRef.current().then((token) => {
       if (cancelled || !token) return;
-      const url = wsUrlForRun(API_BASE, id, token);
-      const ws = new WebSocket(url);
+      const url = wsUrlForRun(API_BASE, id);
+      // Pass token as WebSocket subprotocol — not logged by proxies or in browser history.
+      const ws = new WebSocket(url, token);
       wsRef.current = ws;
 
       ws.onmessage = (ev) => {

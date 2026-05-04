@@ -37,6 +37,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import secrets
 import time
 import uuid
@@ -113,6 +114,14 @@ def _validate_environment() -> None:
         raise RuntimeError(
             "OPENROUTER_API_KEY environment variable is not set. "
             "Set it before starting the server."
+        )
+    clerk_url = os.getenv("CLERK_ISSUER_URL", "").rstrip("/")
+    if clerk_url and not re.match(
+        r"^https://[a-zA-Z0-9-]+\.(clerk\.accounts\.dev|clerk\.com)$", clerk_url
+    ):
+        raise RuntimeError(
+            f"CLERK_ISSUER_URL '{clerk_url}' does not match the expected Clerk domain pattern "
+            "(https://<tenant>.clerk.accounts.dev or https://<tenant>.clerk.com)."
         )
 
 
@@ -237,6 +246,8 @@ else:
     streamable_http_app = getattr(_mcp, "streamable_http_app")
     _mcp_app = streamable_http_app()
 
+_hide_docs = os.getenv("HIDE_DOCS", "").lower() in ("1", "true", "yes")
+
 # Mounted ASGI apps do not receive lifespan events; Streamable HTTP requires MCP lifespan
 # so the session manager task group starts (see fastmcp.utilities.lifespan.combine_lifespans).
 app = FastAPI(
@@ -244,9 +255,17 @@ app = FastAPI(
     description="REST API for creating, queuing, and polling council debate runs.",
     version="0.1.0",
     lifespan=combine_lifespans(_lifespan, _mcp_app.lifespan),
+    docs_url=None if _hide_docs else "/docs",
+    redoc_url=None if _hide_docs else "/redoc",
+    openapi_url=None if _hide_docs else "/openapi.json",
 )
 
 _cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if o.strip()]
+if "*" in _cors_origins:
+    raise RuntimeError(
+        "CORS_ORIGINS='*' cannot be combined with allow_credentials=True. "
+        "Set CORS_ORIGINS to one or more explicit allowed origins."
+    )
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
@@ -634,7 +653,8 @@ async def get_current_user(
         user_id = _verify_clerk_jwt(token)
         if user_id:
             return AuthenticatedUser(user_id=user_id, tier=_resolve_request_tier())
-        # Invalid JWT — fall through to API key check (could be a different JWT-like string)
+        # Fail hard — a JWT-shaped token that fails validation is never a valid API key.
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     # 2. Try DB-backed API key
     if token.startswith("tc_"):
@@ -691,13 +711,14 @@ def _count_runs_this_month(runs: list[Run]) -> int:
 
 
 class CreateRunConfig(BaseModel):
-    """Run configuration for ``POST /runs``. Known keys are validated; others pass through."""
+    """Run configuration for ``POST /runs``."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     num_agents: int | None = Field(None, ge=0, description="Agent count; tier limits enforced separately.")
     num_rounds: int | None = Field(None, ge=0, le=12)
     rounds: int | None = Field(None, ge=0, le=12, description="Alias for num_rounds.")
+    mode: str | None = Field(None, max_length=32, description="Personality mode: canned, dynamic, hybrid, or generated.")
     selected_persona_ids: list[str] | None = None
     model: str | None = Field(None, max_length=128)
     max_input_tokens: int | None = Field(None, ge=0, le=2_000_000)
@@ -809,6 +830,14 @@ async def create_run(
 
     if body.computer_use_enabled:
         require_tier(auth, TierName.ULTRA)
+
+    # Validate sandbox_cmd early to surface errors before enqueuing.
+    if cfg.get("sandbox_cmd"):
+        from council.features.sandbox import _validate_sandbox_cmd
+        try:
+            _validate_sandbox_cmd(str(cfg["sandbox_cmd"]))
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
 
     # Persist feature flags in the run config so the worker can read them.
     run_config = dict(cfg)
@@ -1004,20 +1033,24 @@ async def stripe_webhook(request: Request) -> JSONResponse:
     sig_header = request.headers.get("stripe-signature", "")
     webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 
-    if webhook_secret:
+    if not webhook_secret:
+        # Allow unsigned webhooks only when explicitly opted-in (dev/test only).
+        if os.getenv("STRIPE_DISABLE_WEBHOOK_VERIFICATION", "") == "1":
+            logger.warning("STRIPE_DISABLE_WEBHOOK_VERIFICATION=1 — skipping Stripe signature check (dev/test only).")
+            try:
+                import json as _json
+                event = _json.loads(payload)
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid JSON payload.")
+        else:
+            logger.error("STRIPE_WEBHOOK_SECRET not set; rejecting unsigned webhook POST.")
+            raise HTTPException(status_code=400, detail="Webhook verification required: STRIPE_WEBHOOK_SECRET is not configured.")
+    else:
         try:
             event = parse_webhook_event(payload, sig_header, webhook_secret)
         except (ValueError, ImportError) as exc:
             logger.warning("Stripe webhook verification failed: %s", exc)
             raise HTTPException(status_code=400, detail="Webhook verification failed.")
-    else:
-        # No secret configured — skip signature verification (dev/test mode).
-        logger.warning("STRIPE_WEBHOOK_SECRET not set; skipping signature verification.")
-        try:
-            import json as _json
-            event = _json.loads(payload)
-        except Exception:
-            raise HTTPException(status_code=400, detail="Invalid JSON payload.")
 
     event_type = event.get("type")
 
@@ -1723,11 +1756,29 @@ async def accept_tos(
             detail=f"Unknown ToS version '{body.version}'. Current version is '{CURRENT_TOS_VERSION}'.",
         )
     accepted_at = time.time()
-    _tos_store[auth.owner_id] = {
-        "owner_id": auth.owner_id,
-        "version": body.version,
-        "accepted_at": accepted_at,
-    }
+
+    engine = get_engine()
+    if engine is not None:
+        from council.db.models import TosAcceptance
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        async with get_session_ctx() as session:
+            stmt = pg_insert(TosAcceptance).values(
+                owner_id=auth.owner_id,
+                version=body.version,
+                accepted_at=accepted_at,
+            ).on_conflict_do_update(
+                index_elements=["owner_id"],
+                set_={"version": body.version, "accepted_at": accepted_at},
+            )
+            await session.execute(stmt)
+            await session.commit()
+    else:
+        _tos_store[auth.owner_id] = {
+            "owner_id": auth.owner_id,
+            "version": body.version,
+            "accepted_at": accepted_at,
+        }
+
     return {
         "tos_accepted": True,
         "version": body.version,
@@ -1751,6 +1802,32 @@ async def get_tos_status(
     ``tos_accepted`` will be ``False`` and ``current_version`` indicates what
     must be accepted.
     """
+    engine = get_engine()
+    if engine is not None:
+        from council.db.models import TosAcceptance
+        from sqlalchemy import select
+        async with get_session_ctx() as session:
+            result = await session.execute(
+                select(TosAcceptance).where(
+                    TosAcceptance.__table__.c.owner_id == auth.owner_id
+                )
+            )
+            row = result.scalar_one_or_none()
+        if row is None:
+            return {
+                "tos_accepted": False,
+                "current_version": CURRENT_TOS_VERSION,
+                "accepted_version": None,
+                "accepted_at": None,
+            }
+        return {
+            "tos_accepted": row.version == CURRENT_TOS_VERSION,
+            "current_version": CURRENT_TOS_VERSION,
+            "accepted_version": row.version,
+            "accepted_at": row.accepted_at,
+        }
+
+    # DB unavailable — fall back to in-memory store
     record = _tos_store.get(auth.owner_id)
     if record is None:
         return {
@@ -1856,22 +1933,45 @@ async def run_websocket(websocket: WebSocket, run_id: str) -> None:
       {"type": "run_started" | "agent_response" | "agent_dm" | "run_completed" | "run_failed",
        "run_id": "...", "ts": 1234567890.0, ...}
 
-    Authentication: pass token as query param ``?token=<bearer_token>`` (same value as REST ``Authorization: Bearer``).
+    Authentication: pass token via the ``Sec-WebSocket-Protocol`` header (preferred) or
+    as a ``?token=`` query param (deprecated — logged by proxies).
 
     Close codes: 4000 server misconfig, 4001 invalid token, 4003 run not owned by token, 4004 run not found.
 
-    TODO: Security - move token to WebSocket subprotocol or post-connect auth message
-    to avoid token appearing in server logs and proxy access logs.
     IMPORTANT: Never log ``token`` or ``websocket.query_params`` — they contain the bearer token.
     """
-    token = websocket.query_params.get("token", "")
-    try:
-        expected = _get_api_secret()
-    except RuntimeError:
-        await websocket.close(code=4000)
+    # Prefer subprotocol header (not logged by nginx/proxies).
+    token = websocket.headers.get("sec-websocket-protocol", "")
+    if token:
+        _ws_use_subprotocol = True
+    else:
+        # Fall back to query param for backward compatibility.
+        token = websocket.query_params.get("token", "")
+        _ws_use_subprotocol = False
+
+    if not token:
+        await websocket.close(code=4001)
         return
 
-    if not token or not secrets.compare_digest(token, expected):
+    # Resolve user_id using the same 3-tier chain as get_current_user.
+    user_id: str | None = None
+    if token.startswith("eyJ"):
+        user_id = _verify_clerk_jwt(token)
+        if user_id is None:
+            await websocket.close(code=4001)
+            return
+    elif token.startswith("tc_"):
+        user_id = await _verify_api_key(token)
+    else:
+        try:
+            api_secret = _get_api_secret()
+            if secrets.compare_digest(token, api_secret):
+                user_id = "dev"
+        except RuntimeError:
+            await websocket.close(code=4000)
+            return
+
+    if user_id is None:
         await websocket.close(code=4001)
         return
 
@@ -1881,11 +1981,12 @@ async def run_websocket(websocket: WebSocket, run_id: str) -> None:
         await websocket.close(code=4004)
         return
 
-    if not run.owner_id or not secrets.compare_digest(run.owner_id, token):
+    if run.owner_id and run.owner_id != user_id:
         await websocket.close(code=4003)
         return
 
-    await websocket.accept()
+    # Echo subprotocol back so the browser doesn't close the connection.
+    await websocket.accept(subprotocol=token if _ws_use_subprotocol else None)
 
     if run_id not in _ws_connections:
         _ws_connections[run_id] = set()
@@ -1996,13 +2097,36 @@ async def zoom_webhook(request: Request) -> JSONResponse:
 
 
 def _extract_run_id_from_topic(topic: str) -> str | None:
-    """Extract a council run_id embedded in a Zoom meeting topic.
+    """Extract a council run_id from a Zoom meeting topic, verifying an HMAC token.
 
-    Convention: meeting topic contains ``[council:<run_id>]``.
+    Expected format: ``[council:<run_id>:<hmac_token>]``
+    where hmac_token = HMAC-SHA256(ZOOM_RUN_SECRET, run_id), hex-encoded.
+
+    If ZOOM_RUN_SECRET is not configured, the integration is disabled and
+    None is always returned to prevent unauthenticated artifact exposure.
     """
-    import re
-    match = re.search(r"\[council:([^\]]+)\]", topic)
-    return match.group(1) if match else None
+    zoom_run_secret = os.getenv("ZOOM_RUN_SECRET", "")
+    if not zoom_run_secret:
+        logger.warning(
+            "ZOOM_RUN_SECRET not set — Zoom artifact posting disabled. "
+            "Set ZOOM_RUN_SECRET to enable the Zoom integration."
+        )
+        return None
+
+    match = re.search(r"\[council:([^:\]]+):([^\]]+)\]", topic)
+    if not match:
+        return None
+
+    run_id, provided_token = match.group(1), match.group(2)
+    expected_token = hmac.new(
+        zoom_run_secret.encode(), run_id.encode(), hashlib.sha256
+    ).hexdigest()
+
+    if not secrets.compare_digest(expected_token, provided_token):
+        logger.warning("Zoom topic HMAC verification failed for run_id %r — ignoring.", run_id)
+        return None
+
+    return run_id
 
 
 async def _post_zoom_artifact_summary(run_id: str, channel_id: str) -> None:

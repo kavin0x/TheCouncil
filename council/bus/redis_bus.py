@@ -26,8 +26,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from typing import Any, AsyncGenerator
+
+_RUN_ID_RE = re.compile(r"^[0-9a-f\-]{8,36}$")
 
 from dotenv import load_dotenv
 
@@ -49,6 +52,8 @@ _MAX_RETRIES = 3          # before dead-lettering
 
 
 def _run_stream(run_id: str) -> str:
+    if not _RUN_ID_RE.match(run_id):
+        raise ValueError(f"Invalid run_id format: {run_id!r}")
     return f"council:run:{run_id}:events"
 
 
