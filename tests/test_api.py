@@ -197,9 +197,10 @@ class TestListRuns:
 
 class TestStripeWebhook:
     @pytest.mark.asyncio
-    async def test_webhook_without_secret_accepts_valid_json(self, client, monkeypatch):
-        """When STRIPE_WEBHOOK_SECRET is unset, valid JSON events are accepted."""
+    async def test_webhook_without_secret_rejected(self, client, monkeypatch):
+        """When STRIPE_WEBHOOK_SECRET is unset and verification bypass is not enabled, webhook is rejected."""
         monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
+        monkeypatch.delenv("STRIPE_DISABLE_WEBHOOK_VERIFICATION", raising=False)
         payload = {
             "type": "checkout.session.completed",
             "data": {
@@ -215,8 +216,8 @@ class TestStripeWebhook:
             content=json.dumps(payload),
             headers={"Content-Type": "application/json"},
         )
-        assert resp.status_code == 200
-        assert resp.json() == {"received": True}
+        assert resp.status_code == 400
+        assert "verification" in resp.json()["detail"].lower()
 
     @pytest.mark.asyncio
     async def test_webhook_invalid_json_returns_400(self, client, monkeypatch):

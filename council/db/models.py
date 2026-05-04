@@ -303,3 +303,18 @@ class ApiKey(Base):
             "last_used_at": self.last_used_at,
             "is_active": self.is_active,
         }
+
+
+# ---------------------------------------------------------------------------
+# ToS acceptance
+# ---------------------------------------------------------------------------
+
+
+class TosAcceptance(Base):
+    """Persists per-user Terms of Service acceptance, keyed by owner_id (Clerk user ID)."""
+
+    __tablename__ = "tos_acceptances"
+
+    owner_id: str = Column(String(255), primary_key=True)
+    version: str = Column(String(32), nullable=False)
+    accepted_at: float = Column(Float, nullable=False, default=_now)
