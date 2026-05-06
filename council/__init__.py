@@ -35,10 +35,6 @@ from council.models.state import (
     run_store,
     run_queue,
 )
-from council.models.subscriptions import (
-    TierName,
-    SubscriptionTier,
-)
 
 # API
 from council.api.app import app as fastapi_app
@@ -67,8 +63,6 @@ __all__ = [
     "RunStatus",
     "run_store",
     "run_queue",
-    "TierName",
-    "SubscriptionTier",
     # API
     "fastapi_app",
 ]
