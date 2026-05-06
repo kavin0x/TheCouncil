@@ -31,14 +31,23 @@ _ALLOWED_SANDBOX_COMMANDS = frozenset({
     "npm", "npx", "java", "javac", "go", "ruby", "perl", "r",
 })
 
-# Shell metacharacters tha# Shell metacharacters tha# Shell metan
-_SHELL_METACHAR_RE = re.compile(r"[|;&`$<>_SHELL_METACHAR_RE = re.compile(r"[|;&`$<>_SHELL_METACHAR_RE = re.compile(r"[|;&`$<>_SHELL_METox command string against an allowlist and reject shell metacharacters.
+# Shell metacharacters that allow command chaining or redirection
+_SHELL_METACHAR_RE = re.compile(r"[|;&`$<>{}()\n\r]|\$\(|&&|\|\|")
 
-                                                    """
-                                     
-             n "p            ri             l         ready')\""
 
-    if _SHEL    if _SHEL    if _Scmd    if _SHEL    if _SHEL    if _Scm       if _SHEL    if _SHEL    if _Scmd    if _SHEL    if _SHEL    if _Scm      a    if _SHEL    if _SHEL ipes, semicolons, redirects, or subshells."
+def _validate_sandbox_cmd(cmd: str) -> str:
+    """Validate a sandbox command string against an allowlist and reject shell metacharacters.
+
+    Raises ValueError if the command is unsafe.
+    """
+    cmd = cmd.strip()
+    if not cmd:
+        return "python -c \"print('TheCouncil sandbox ready')\""
+
+    if _SHELL_METACHAR_RE.search(cmd):
+        raise ValueError(
+            "sandbox_cmd contains disallowed shell metacharacters. "
+            "Use a simple command without pipes, semicolons, redirects, or subshells."
         )
 
     base_command = cmd.split()[0].lower()
@@ -66,19 +75,74 @@ class SandboxDisabledError(RuntimeError):
 # ---------------------------------------------------------------------------
 # Session-scoped Desktop sandbox registry
 # One container per active session_id; killed on session end/timeout.
-# --------------------------# --------------------------# --------------------------# --------------------------# --------------------------# --------------------------# --------------------------# --------------------------# ---------------------ing Docker desktop sandbox for *session_id*, or create # --------------------------# --------------------------# ---rs# --------------------------# -----------------ndboxDisabledError with instructions.
+# ---------------------------------------------------------------------------
+_desktop_sandboxes: dict[str, Any] = {}
+_desktop_sandbox_lock = asyncio.Lock()
+
+
+async def get_or_create_desktop_sandbox(session_id: str) -> Any:
+    """Return the existing Desktop sandbox for *session_id*, or create one.
+
+    Docker + noVNC-based desktop sandbox. Not implemented by default; this is
+    a placeholder showing the integration pattern for users who want to add VNC
+    desktop support to their deployment.
 
     To implement:
-                          ma                          ma                          ma                          ma          3. Expose VNC via noVNC (typically localhost:6080/vnc.html)
+      1. Spin up an Ubuntu container with XFCE desktop environment
+      2. Install and start VNC server (e.g., tigervnc)
+      3. Install and configure noVNC for web-based access
       4. Return container object with stream.get_url() method
-                               edError                           (co                               edError   "To enable,                                edError                           (co        ation logic. "
-        "See documentation in        "See documentation in        "See documentation in        c de        "See documentation in        "See documentation in        "See documentation in        c de        "See documentation in        "See documentation in        "See documentation in        c de        "See documentation in        "See documentation in        "See documentation in        c de        "See documentation in        "See documentation in        "See documentation in        c de        "See documentation in        "See doc", session_id, exc)
+
+    Raises SandboxDisabledError until custom integration is added.
+    """
+    raise SandboxDisabledError(
+        "Desktop sandbox (computer-use with VNC) is not implemented by default. "
+        "To enable, integrate Docker + XFCE + noVNC following the pattern in "
+        "council/features/sandbox.py:get_or_create_desktop_sandbox()."
+    )
 
 
-async async async async async async async async async async async async async async async async async async async async async async async async async async async async async async async ""async async async async async async esktop_sandbox(session_id)async async async async async async async async async async async async async async async async async async async async async async async async async async async async async async async ""async async async asyboxasync async async async async async async async async async async async async async async async async async async async async async async async async async async async async async async ""async async async async async async esktop_sandbox(session_id)async async async async async async async async async async async async async async async async async async async async async async async async async async async async async async async ""async async async asyboxasync async async async async async async async async async async async async async async asynsk(*, question: str, config: dict[str, Any] | None = None) -> dict[str, Any]:
+async def kill_desktop_sandbox(session_id: str) -> None:
+    """Kill and remove the Desktop sandbox for *session_id* (no-op if none)."""
+    async with _desktop_sandbox_lock:
+        sandbox = _desktop_sandboxes.pop(session_id, None)
+    if sandbox is not None:
+        try:
+            # Placeholder: call container.kill() when implemented
+            logger.debug("Desktop sandbox cleanup placeholder for session %r", session_id)
+        except Exception as exc:
+            logger.warning("Failed to cleanup Desktop sandbox for session %r: %s", session_id, exc)
+
+
+async def get_desktop_sandbox_stream_url(session_id: str) -> str:
+    """Return the VNC stream URL for the active Desktop sandbox.
+
+    Creates the sandbox if it doesn't exist yet. Placeholder implementation.
+    """
+    await get_or_create_desktop_sandbox(session_id)
+
+
+async def run_computer_use_step(
+    sandbox: Any,
+    action: dict[str, Any],
+) -> dict[str, Any]:
+    """Execute a single computer-use action on the Desktop sandbox (placeholder).
+
+    Supported action types:
+      left_click, right_click, double_click, write, press, scroll, drag, screenshot
+
+    Returns a dict with the outcome.
+    """
+    raise SandboxDisabledError(
+        "Desktop sandbox is not implemented. See get_or_create_desktop_sandbox() for integration details."
+    )
+
+
+async def run_sandbox_task(*, question: str, config: dict[str, Any] | None = None) -> dict[str, Any]:
     """Code execution sandbox using Docker.
 
     Spins up a temporary Docker container, runs a bounded command, and returns output.
+    Uses python:3.11-slim as the default image.
     """
     try:
         import docker  # type: ignore[import]
@@ -98,23 +162,40 @@ async async async async async async async async async async async async async as
 
     timeout_s = int(cfg.get("sandbox_timeout_s") or 60)
 
-    # Get Docker client (uses DOCKER_HOST env var if set, otherwise local socket)
     try:
         client = docker.from_env()
     except Exception as exc:
         raise SandboxDisabledError(f"Failed to connect to Docker daemon: {exc}") from exc
 
-    stdout_text = ""
-    stderr_text = ""
-    exit_code = N    exit_code = N    exit_code = N    exit_code = N    exit_code = N  on    exit_code = N    exit_code = N    exittry    exit_code = N    exit_code = N    exit_code = N    exit_code = N    exit_code = Nag    ex     except    exit_code = N    exit_code = N    exir.war    exit_code = N    es:    exit_code = N    exit_code age,     exit_code = N    exit_code = N    exit_code = N    exit_code = N   r_    ex
-                                                      ve container after execution
+    try:
+        result = client.containers.run(
+            "python:3.11-slim",
+            cmd,
+            remove=True,
             timeout=timeout_s,
-            timeout=timeout_s,
-            te            te            t = result.decode("utf-8", errors="replace")
-        else:
-            stdout_text = str(result)
+        )
+        stdout = result.decode() if isinstance(result, bytes) else str(result)
+        stderr = ""
+        exit_code = 0
+    except Exception:
+        # For simplicity, return the result as-is; adjust error handling as needed
+        try:
+            import docker
+            if isinstance(Exception, docker.errors.ContainerError):
+                stdout = str(getattr(Exception, "stdout", ""))
+                stderr = str(getattr(Exception, "stderr", ""))
+                exit_code = getattr(Exception, "exit_status", 1)
+            else:
+                raise
+        except Exception:
+            raise SandboxDisabledError(f"Docker command execution failed") from None
 
-        exit_code = 0  # Assu        exit_code = 0  # Assu        exit_code = 0  # Assu        exit_code = 0 r(                 exit_code = 0  # Assu   s =        exit_code = 0  # star        exit_code = 0  # Assu        exit_code = 0  # Assu        exit_code = 0  # Assu  st        exit_code ="stderr": stderr_text,
+    elapsed_ms = int((time.monotonic() - start) * 1000)
+    return {
+        "kind": "sandbox",
+        "cmd": cmd,
+        "stdout": stdout,
+        "stderr": stderr,
         "exit_code": exit_code,
         "meta": {
             "elapsed_ms": elapsed_ms,
@@ -122,3 +203,4 @@ async async async async async async async async async async async async async as
             "cua_model": os.getenv("SANDBOX_CUA_MODEL") or None,
         },
     }
+
