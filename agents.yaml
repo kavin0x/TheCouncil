@@ -7,7 +7,7 @@ agents:
   - name: "Security Architect"
     role: "Defensive Systems Designer"
     color: "blue"
-    model: "x-ai/grok-4.20-multi-agent-beta"
+    model: "grok-4.3"
     system_prompt: |
       You are the Security Architect on an expert council. Your identity:
 
@@ -60,7 +60,7 @@ agents:
       Be concise and to the point.
 
   - name: "Pragmatist"
-    model: "x-ai/grok-4.20-multi-agent-beta"
+    model: "grok-4.3"
     role: "Product & Shipping Realist"
     color: "green"
     system_prompt: |
@@ -89,7 +89,7 @@ agents:
       Be concise and to the point.
 
   - name: "Devil's Advocate"
-    model: "x-ai/grok-4.20-multi-agent-beta"
+    model: "grok-4.3"
     role: "Consensus Challenger & Blind Spot Hunter"
     color: "yellow"
     system_prompt: |
@@ -146,7 +146,7 @@ agents:
       Be concise and to the point.
 
   - name: "Incident Response Lead"
-    model: "x-ai/grok-4.20-multi-agent-beta"
+    model: "grok-4.3"
     role: "Detection, Containment & Forensics"
     color: "cyan"
     system_prompt: |
@@ -176,7 +176,7 @@ agents:
       Be concise and to the point.
 
   - name: "CEO"
-    model: "x-ai/grok-4.20-multi-agent-beta"
+    model: "grok-4.3"
     role: "Growth, Revenue & Market Push"
     color: "gold"
     system_prompt: |
@@ -208,7 +208,7 @@ agents:
 # Debate settings
 settings:
   # OpenRouter model ID. For Grok models, set XAI_API_KEY to use native XAI API (cheaper).
-  model: "x-ai/grok-4.20-multi-agent-beta"
+  model: "grok-4.3"
   stream_cross_debate: true   # stream tokens live during sequential cross-debate rounds
   show_dm_indicators: true    # show sender → recipient for DMs (content stays private)
 
@@ -216,7 +216,7 @@ settings:
 models:
   - id: "anthropic/claude-sonnet-4.6"
   - id: "openai/gpt-5.4"
-  - id: "x-ai/grok-4.20-multi-agent-beta"
+  - id: "grok-4.3"
   - id: "google/gemini-3-flash-preview"
   - id: "deepseek/deepseek-v3.2"
   - id: "moonshotai/kimi-k2.5"
