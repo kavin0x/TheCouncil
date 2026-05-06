@@ -170,8 +170,7 @@ class TestGetRun:
 
     @pytest.mark.asyncio
     async def test_invalid_token_returns_401(self, client, monkeypatch):
-        """A token that does not match API_SECRET_KEY, is not a valid Clerk JWT,
-        and does not match a DB API key returns 401."""
+        """A token that does not match API_SECRET_KEY and does not match a DB API key returns 401."""
         monkeypatch.setenv("API_SECRET_KEY", "token-a")
         resp = await client.get(
             "/runs/some-run-id",
