@@ -68,6 +68,20 @@ class TestAuth:
         assert resp.status_code == 401
 
     @pytest.mark.asyncio
+    async def test_jwt_shape_does_not_fall_through_to_api_secret(self, client, monkeypatch):
+        """A JWT-shaped token that fails verification must not authenticate as the dev secret."""
+        jwt_like_token = "eyJ.invalid-but-secret"
+        monkeypatch.setenv("API_SECRET_KEY", jwt_like_token)
+
+        resp = await client.post(
+            "/runs",
+            json={"question": "hi"},
+            headers={"Authorization": f"Bearer {jwt_like_token}"},
+        )
+
+        assert resp.status_code == 401
+
+    @pytest.mark.asyncio
     async def test_valid_token_proceeds(self, client):
         resp = await client.post("/runs", json={"question": "Is this valid?"}, headers=AUTH)
         assert resp.status_code == 202
