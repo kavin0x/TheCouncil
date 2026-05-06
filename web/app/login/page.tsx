@@ -25,15 +25,7 @@ export default async function LoginPage() {
         </div>
 
         <p className="mt-6 text-center text-xs text-zinc-700">
-          By signing in you agree to our{" "}
-          <Link href="/legal#tos" className="underline underline-offset-2 hover:text-zinc-500">
-            Terms of Service
-          </Link>{" "}
-          and{" "}
-          <Link href="/legal#privacy" className="underline underline-offset-2 hover:text-zinc-500">
-            Privacy Policy
-          </Link>
-          .
+          Self-hosted open source — licensed under Apache 2.0.
         </p>
       </div>
     </div>

@@ -95,27 +95,21 @@ export default function LandingPage() {
           </div>
           <nav className="flex items-center gap-5">
             <Link
-              href="/pricing"
-              className="text-xs text-zinc-500 hover:text-zinc-200 transition-colors"
-            >
-              Pricing
-            </Link>
-            <Link
-              href="https://github.com"
+              href="https://github.com/kavin0x/TheCouncil"
               className="text-xs text-zinc-500 hover:text-zinc-200 transition-colors"
               target="_blank"
-              rel="noopener"
+              rel="noopener noreferrer"
             >
-              Docs
+              GitHub
             </Link>
             <Link href="/login">
               <Button variant="outline" size="sm">
                 Sign in
               </Button>
             </Link>
-            <Link href="/pricing">
+            <Link href="/login">
               <Button size="sm">
-                Get access
+                Get started
               </Button>
             </Link>
           </nav>
@@ -156,20 +150,20 @@ export default function LandingPage() {
             </p>
 
             <div className="flex items-center gap-3">
-              <Link href="/pricing">
+              <Link href="/login">
                 <Button size="lg" className="gap-2">
-                  Start free trial <ArrowRight className="h-4 w-4" />
+                  Get started <ArrowRight className="h-4 w-4" />
                 </Button>
               </Link>
-              <Link href="/login">
+              <Link href="https://github.com/kavin0x/TheCouncil" target="_blank" rel="noopener noreferrer">
                 <Button size="lg" variant="outline">
-                  Sign in
+                  View on GitHub
                 </Button>
               </Link>
             </div>
 
             <div className="mt-8 flex items-center gap-6 text-xs text-zinc-600">
-              <span>14-day trial · No card required</span>
+              <span>Open source · Self-hosted</span>
               <span>·</span>
               <span>REST API + MCP server</span>
               <span>·</span>
@@ -215,19 +209,26 @@ export default function LandingPage() {
       <section className="mx-auto w-full max-w-6xl px-6 pb-24">
         <div className="rounded-xl border border-zinc-800 bg-gradient-to-b from-violet-950/10 to-zinc-900/20 p-10 text-center">
           <p className="mb-2 font-mono text-xs uppercase tracking-widest text-zinc-600">
-            Get started
+            Self-hosted · Open source
           </p>
           <h2 className="mb-3 text-2xl font-bold text-white">
-            14-day free trial. Full Pro features.
+            Run your own council.
           </h2>
           <p className="mb-8 text-sm text-zinc-500">
-            No credit card required. Cancel any time.
+            Deploy locally with Docker or directly with Python + Node. Apache 2.0 licensed.
           </p>
-          <Link href="/pricing">
-            <Button size="lg">
-              Choose a plan
-            </Button>
-          </Link>
+          <div className="flex items-center justify-center gap-3">
+            <Link href="/login">
+              <Button size="lg">
+                Get started
+              </Button>
+            </Link>
+            <Link href="https://github.com/kavin0x/TheCouncil" target="_blank" rel="noopener noreferrer">
+              <Button size="lg" variant="outline">
+                View on GitHub
+              </Button>
+            </Link>
+          </div>
         </div>
       </section>
 
@@ -236,24 +237,21 @@ export default function LandingPage() {
         <div className="mx-auto max-w-6xl px-6">
           <div className="flex items-center justify-between">
             <span className="font-mono text-xs text-zinc-700">
-              © {new Date().getFullYear()} TheCouncil LLC
+              © {new Date().getFullYear()} TheCouncil — Apache 2.0
             </span>
             <div className="flex items-center gap-5 text-xs text-zinc-600">
-              <Link href="/pricing" className="hover:text-zinc-400 transition-colors">
-                Pricing
-              </Link>
-              <Link href="/legal#privacy" className="hover:text-zinc-400 transition-colors">
-                Privacy
-              </Link>
-              <Link href="/legal#tos" className="hover:text-zinc-400 transition-colors">
-                Terms
+              <Link
+                href="https://github.com/kavin0x/TheCouncil"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-zinc-400 transition-colors"
+              >
+                GitHub
               </Link>
             </div>
           </div>
           <p className="mt-3 font-mono text-[10px] text-zinc-700">
             AI-generated outputs are for informational purposes only and do not constitute legal, medical, financial, or other professional advice.
-            TheCouncil LLC makes no warranties as to accuracy. By using the service you agree to our{" "}
-            <Link href="/legal#tos" className="underline underline-offset-2 hover:text-zinc-500 transition-colors">Terms of Service</Link>.
           </p>
         </div>
       </footer>

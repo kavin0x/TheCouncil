@@ -27,3 +27,12 @@ out/
 
 # Logs
 *.log
+
+# Session data (local persona files, generated people)
+sessions/
+
+# Cursor AI planning files
+.cursor/plans/
+
+# Local assets / photos
+photos/
