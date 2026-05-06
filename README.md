@@ -1,55 +1,126 @@
 # TheCouncil
 
-## Repository layout
+A multi-agent AI deliberation platform that orchestrates structured debates between LLM personas. Self-hosted, open-source, and built for extensibility.
 
-| Path                                                               | Purpose                                |
-| ------------------------------------------------------------------ | -------------------------------------- |
-| `api.py`, `council.py`, `run_state.py`, `subscriptions.py` | Core API, runner, and run storage      |
-| `agents.yaml`                                                    | Default agent definitions for the CLI  |
-| `sessions/`                                                      | Generated session data (e.g. personas) |
-| `samples/chats/`                                                 | Example chat exports for local testing |
-| `tests/`                                                         | `pytest` suite                       |
-| `web/`                                                           | Next.js 16 UI (`npm run dev`)        |
-| `plans/`                                                         | Internal deployment / roadmap notes    |
+## Features
 
-## Python (API & CLI)
+- **Multi-Agent Debates**: Orchestrate 5-phase structured deliberations (Independent Takes → Cross-Debate → Private Messages → Resolution)
+- **Flexible Personas**: Use pre-configured personas, generate dynamically from topics, or import custom agent definitions
+- **Sandbox Execution**: Run code safely in Docker containers (computer-use workflows)
+- **Web Search**: Integrate external knowledge via Tavily API
+- **Real-time Events**: WebSocket streams for live debate progress tracking
+- **MCP Integration**: Control TheCouncil from your IDE (Cursor, Claude Desktop, etc.)
+- **REST API**: Full HTTP API for programmatic access
+- **Self-Hosted**: Deploy on your own infrastructure with Docker or bare metal
 
-Prerequisites: Python 3.12+ and a virtualenv (`.venv` recommended).
+## Repository Layout
+
+| Path                         | Purpose                              |
+| ---------------------------- | ------------------------------------ |
+| `council/api/`               | FastAPI REST API & WebSocket server  |
+| `council/core/`              | Debate orchestration engine          |
+| `council/features/`          | Sandbox, search, content guardrails  |
+| `council/db/`                | Database models & migrations         |
+| `council/worker/`            | Celery task queue integration        |
+| `agents.yaml`                | Default agent definitions            |
+| `web/`                       | Next.js 16 UI dashboard              |
+| `tests/`                     | `pytest` backend suite               |
+| `docker-compose.yml`         | Full-stack local development         |
+
+## Quick Start
+
+### Backend (Python)
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate   # macOS / Linux
+source .venv/bin/activate      # or `venv\Scripts\activate` on Windows
 pip install -r requirements.txt
-cp .env.example .env        # add keys
+cp .env.example .env            # populate with your API keys
 
-# HTTP API (dev)
-uvicorn api:app --reload --reload-dir council --reload-dir tests --reload-exclude 'web/*' --reload-exclude 'node_modules/*' --reload-exclude '.next/*' --reload-exclude '.venv/*'
-
-# MCP server (remote) is mounted at:
-#   http://localhost:3000/mcp  (Next.js frontend proxy → backend)
-# and is tier-gated via DEFAULT_SUBSCRIPTION_TIER (demo only).
-
-# CLI (see council.py --help)
-python council.py --help
+# Run the API
+uvicorn council.api.app:app --reload --reload-dir council --reload-dir tests
+# API available at http://localhost:8000
+# Interactive docs at http://localhost:8000/docs
 ```
 
-## Web app
+### Frontend (Next.js)
 
 ```bash
 cd web
 npm ci
 npm run dev
+# App available at http://localhost:3000
 ```
 
-`npm run dev` now starts Next.js with a 4 GB heap cap (`--max-old-space-size=4096`) to prevent runaway memory usage from crashing the machine during development.
+### Full Stack (Docker)
 
-Set `NEXT_PUBLIC_API_BASE_URL` to your API origin (see `web/.env` patterns in `.gitignore`).
+```bash
+docker-compose up -d
+# API: http://localhost:8000
+# Web: http://localhost:3000
+# PostgreSQL, Redis, and Celery worker also running
+```
 
-## Quality checks
+## Configuration
 
-- **Python:** `pytest tests/ -q` and `ruff check .` (config in `pyproject.toml`)
-- **Web:** `cd web && npm run lint && npm run typecheck && npm run test`
+Copy `.env.example` to `.env` and populate these required variables:
+
+- `OPENROUTER_API_KEY` — LLM provider (OpenRouter for variety of models)
+- `API_SECRET_KEY` — Bearer token for API auth (min 32 chars in production)
+- `DATABASE_URL` — PostgreSQL connection string
+- `REDIS_URL` — Redis connection for pub/sub and job queue
+
+Optional integrations:
+
+- `TAVILY_API_KEY` — Enable web search in debates
+- `XAI_API_KEY` — Use Grok models (cheaper alternative to OpenRouter)
+
+## Testing
+
+**Backend:**
+
+```bash
+pytest tests/ -q
+ruff check .
+```
+
+**Frontend:**
+
+```bash
+cd web
+npm run test          # unit tests (vitest)
+npm run test:e2e      # end-to-end (playwright)
+npm run lint
+npm run typecheck
+```
+
+## Architecture
+
+**Core Debate Flow:**
+
+1. **Independent Takes** — Agents generate initial responses without knowledge of others
+2. **Cross-Debate I** — Sequential rebuttals with visibility into prior responses
+3. **Private Deliberation** — Direct point-to-point messages between agents
+4. **Cross-Debate II** — Final sequential round
+5. **Resolution & Vote** — Agents propose resolutions; voting determines winner
+
+**Tech Stack:**
+
+- Backend: FastAPI + SQLAlchemy async + PostgreSQL
+- Frontend: Next.js 16 + React 19 + Tailwind CSS
+- Message Bus: Redis Streams (pub/sub for real-time events)
+- Job Queue: Celery + Redis (long-running debates)
+- Sandboxing: Docker (code execution for computer-use)
+- LLM Providers: OpenRouter (primary), XAI Grok (optional)
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines, issue reporting, and pull request process.
+
+## Security
+
+For security vulnerabilities, see [SECURITY.md](SECURITY.md).
 
 ## License
 
-Proprietary unless otherwise noted.
+Licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
