@@ -92,7 +92,7 @@ Agents also have **Job Roles** (Devil's Advocate, Moderator, Domain Expert, Cont
 
 ### Real-time Events (`council/bus/`, `council/realtime.py`)
 
-Events are published per-run to Redis Streams (`council:run:{run_id}:events`) and broadcast over WebSocket (`/ws/{run_id}`). Falls back to in-process broadcasting if Redis is unavailable. Event types: `run_started`, `agent_response`, `agent_delta`, `agent_dm`, `resolution_vote`, `run_completed`, `run_failed`.
+Events are published per-run to Redis Streams (`council:run:{run_id}:events`) and broadcast over WebSocket (`/ws/{run_id}`). Falls back to in-process broadcasting if Redis is unavailable. WebSocket auth now prefers the `Sec-WebSocket-Protocol` bearer token; query-token fallback is opt-in via `ALLOW_WEBSOCKET_QUERY_TOKEN=1`. Event types: `run_started`, `agent_response`, `agent_delta`, `agent_dm`, `resolution_vote`, `run_completed`, `run_failed`.
 
 ### Database (`council/db/`)
 
@@ -135,9 +135,11 @@ Three-tier auth stack (tried in order by the `get_current_user` FastAPI dependen
 2. **API Keys** (programmatic/CLI) — user-generated `tc_live_...` keys, sha256-hashed in the `api_keys` DB table. Users create these from `/settings` in the dashboard.
 3. **API_SECRET_KEY** (dev fallback) — single static key used when `CLERK_ISSUER_URL` is not configured.
 
-Backend auth dataclass: `AuthenticatedUser` with fields `user_id` (Clerk `sub` claim or `owner_id`) and `tier`.
+Backend auth dataclass: `AuthenticatedUser` with fields `user_id` (Clerk `sub` claim or `owner_id`), `tier`, and `auth_method`.
+JWT-shaped tokens that fail Clerk verification now hard-fail instead of falling through to API-secret auth.
 
 API key endpoints:
+
 - `POST /me/api-keys` — generate a new key (body: `{name?: string}`); plaintext returned once only
 - `GET /me/api-keys` — list active keys (no plaintext)
 - `DELETE /me/api-keys/{key_id}` — revoke a key

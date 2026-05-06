@@ -134,6 +134,36 @@ def _resolve_request_tier() -> TierName:
         return TierName.BASIC
 
 
+@dataclass(frozen=True)
+class BearerIdentity:
+    """Resolved identity for a bearer token."""
+
+    user_id: str
+    auth_method: str
+
+
+class _InvalidBearerTokenError(RuntimeError):
+    """Raised when a JWT-shaped token fails verification and must not fall through."""
+
+
+def _allow_legacy_websocket_query_token() -> bool:
+    return os.getenv("ALLOW_WEBSOCKET_QUERY_TOKEN", "").lower() in ("1", "true", "yes")
+
+
+def _extract_websocket_token(websocket: WebSocket) -> tuple[str, bool]:
+    """Return the bearer token and whether it came from the subprotocol header."""
+    protocol_header = websocket.headers.get("sec-websocket-protocol", "").strip()
+    if protocol_header:
+        token = protocol_header.split(",", 1)[0].strip()
+        if token:
+            return token, True
+
+    if _allow_legacy_websocket_query_token():
+        return websocket.query_params.get("token", "").strip(), False
+
+    return "", False
+
+
 # ---------------------------------------------------------------------------
 # Clerk JWT verification
 # ---------------------------------------------------------------------------
@@ -193,6 +223,38 @@ async def _verify_api_key(raw_key: str) -> str | None:
             return api_key.owner_id
     except Exception:
         return None
+
+
+async def _resolve_bearer_identity(
+    token: str,
+    *,
+    allow_dev_fallback: bool = True,
+) -> BearerIdentity | None:
+    """Resolve a bearer token to a user identity.
+
+    JWT-shaped tokens that fail verification raise _InvalidBearerTokenError so they
+    never fall through to unrelated auth paths.
+    """
+    if token.startswith("eyJ"):
+        user_id = _verify_clerk_jwt(token)
+        if user_id:
+            return BearerIdentity(user_id=user_id, auth_method="clerk_jwt")
+        raise _InvalidBearerTokenError("Invalid credentials")
+
+    if token.startswith("tc_"):
+        owner_id = await _verify_api_key(token)
+        if owner_id:
+            return BearerIdentity(user_id=owner_id, auth_method="api_key")
+
+    if allow_dev_fallback:
+        try:
+            api_secret = _get_api_secret()
+            if secrets.compare_digest(token, api_secret):
+                return BearerIdentity(user_id="dev", auth_method="api_secret")
+        except RuntimeError:
+            pass
+
+    return None
 
 
 def _mcp_bearer_from_request() -> str | None:
@@ -314,28 +376,11 @@ async def add_rate_limit_headers(request: Request, call_next):  # type: ignore[t
     try:
         token = auth_header[7:].strip()
 
-        # Resolve owner_id using the same priority chain as get_current_user.
-        owner_id: str | None = None
-
-        # 1. Clerk JWT
-        if token.startswith("eyJ"):
-            owner_id = _verify_clerk_jwt(token)
-
-        # 2. DB-backed API key
-        if owner_id is None and token.startswith("tc_"):
-            owner_id = await _verify_api_key(token)
-
-        # 3. Dev fallback
-        if owner_id is None:
-            try:
-                api_secret = _get_api_secret()
-                if secrets.compare_digest(token, api_secret):
-                    owner_id = "dev"
-            except RuntimeError:
-                pass
-
-        if owner_id is None:
+        identity = await _resolve_bearer_identity(token)
+        if identity is None:
             return response
+
+        owner_id = identity.user_id
 
         tier = _resolve_request_tier()
         limits = get_tier(tier).limits
@@ -622,6 +667,7 @@ def _build_artifact_from_result(run_id: str, question: str, result: dict[str, An
 class AuthenticatedUser:
     user_id: str  # Clerk user ID or "api_key:<key_prefix>" or "dev"
     tier: TierName
+    auth_method: str = "api_secret"
 
     @property
     def owner_id(self) -> str:
@@ -644,31 +690,25 @@ async def get_current_user(
     3. API_SECRET_KEY dev fallback
     """
     if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing credentials")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing Authorization credentials",
+        )
 
     token = authorization[7:].strip()
-
-    # 1. Try Clerk JWT (JWTs always start with "eyJ")
-    if token.startswith("eyJ"):
-        user_id = _verify_clerk_jwt(token)
-        if user_id:
-            return AuthenticatedUser(user_id=user_id, tier=_resolve_request_tier())
-        # Fail hard — a JWT-shaped token that fails validation is never a valid API key.
+    # Resolve bearer identity centrally so JWT failures never fall through to
+    # unrelated auth methods.
+    try:
+        identity = await _resolve_bearer_identity(token)
+    except _InvalidBearerTokenError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
-    # 2. Try DB-backed API key
-    if token.startswith("tc_"):
-        owner_id = await _verify_api_key(token)
-        if owner_id:
-            return AuthenticatedUser(user_id=owner_id, tier=_resolve_request_tier())
-
-    # 3. Dev fallback: compare against API_SECRET_KEY
-    try:
-        api_secret = _get_api_secret()
-        if secrets.compare_digest(token, api_secret):
-            return AuthenticatedUser(user_id="dev", tier=_resolve_request_tier())
-    except RuntimeError:
-        pass
+    if identity is not None:
+        return AuthenticatedUser(
+            user_id=identity.user_id,
+            tier=_resolve_request_tier(),
+            auth_method=identity.auth_method,
+        )
 
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
@@ -1933,47 +1973,31 @@ async def run_websocket(websocket: WebSocket, run_id: str) -> None:
       {"type": "run_started" | "agent_response" | "agent_dm" | "run_completed" | "run_failed",
        "run_id": "...", "ts": 1234567890.0, ...}
 
-    Authentication: pass token via the ``Sec-WebSocket-Protocol`` header (preferred) or
-    as a ``?token=`` query param (deprecated — logged by proxies).
+    Authentication: pass token via the ``Sec-WebSocket-Protocol`` header (preferred).
+    ``?token=`` query-param fallback is disabled by default and only available when
+    ``ALLOW_WEBSOCKET_QUERY_TOKEN=1`` is set.
 
     Close codes: 4000 server misconfig, 4001 invalid token, 4003 run not owned by token, 4004 run not found.
 
     IMPORTANT: Never log ``token`` or ``websocket.query_params`` — they contain the bearer token.
     """
-    # Prefer subprotocol header (not logged by nginx/proxies).
-    token = websocket.headers.get("sec-websocket-protocol", "")
-    if token:
-        _ws_use_subprotocol = True
-    else:
-        # Fall back to query param for backward compatibility.
-        token = websocket.query_params.get("token", "")
-        _ws_use_subprotocol = False
+    token, _ws_use_subprotocol = _extract_websocket_token(websocket)
 
     if not token:
         await websocket.close(code=4001)
         return
 
-    # Resolve user_id using the same 3-tier chain as get_current_user.
-    user_id: str | None = None
-    if token.startswith("eyJ"):
-        user_id = _verify_clerk_jwt(token)
-        if user_id is None:
-            await websocket.close(code=4001)
-            return
-    elif token.startswith("tc_"):
-        user_id = await _verify_api_key(token)
-    else:
-        try:
-            api_secret = _get_api_secret()
-            if secrets.compare_digest(token, api_secret):
-                user_id = "dev"
-        except RuntimeError:
-            await websocket.close(code=4000)
-            return
-
-    if user_id is None:
+    try:
+        identity = await _resolve_bearer_identity(token)
+    except _InvalidBearerTokenError:
         await websocket.close(code=4001)
         return
+
+    if identity is None:
+        await websocket.close(code=4001)
+        return
+
+    user_id = identity.user_id
 
     try:
         run = await run_store.get(run_id)
