@@ -1,21 +1,17 @@
 """
-TheCouncil API — FastAPI skeleton.
+TheCouncil API — FastAPI for council debate runs.
 
 Endpoints:
   POST /runs               Create a new council run (enqueues it)
   GET  /runs/{run_id}      Poll the status of a run
   GET  /runs               List runs for the authenticated user
-  GET  /me/entitlements    Current subscription tier and limits
-  GET  /me/usage           Month-to-date usage vs limits
-  GET  /me/billing         Billing summary (tier, trial, next renewal)
-  POST /me/billing/checkout  Create a Stripe Checkout session URL
-  POST /me/billing/portal    Create a Stripe Customer Portal session URL
+  GET  /me/entitlements    Current feature availability
+  GET  /me/usage           Month-to-date usage
   GET  /me/personas        List saved personas for the authenticated user
-  POST /me/personas        Create a persona (respects max_saved_personas cap)
+  POST /me/personas        Create a persona
   GET  /me/personas/{id}   Get a single persona
   PUT  /me/personas/{id}   Update a persona
   DELETE /me/personas/{id} Delete a persona
-  POST /webhooks/stripe    Handle Stripe Payment Links subscription lifecycle events
   POST /api/legal/accept   Record ToS acceptance (version + timestamp)
   GET  /api/legal/status   Check whether current ToS has been accepted
 
@@ -37,6 +33,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -74,11 +71,6 @@ from council.features.sandbox import (  # noqa: E402
     get_desktop_sandbox_stream_url,
     kill_desktop_sandbox,
     run_sandbox_task,
-)
-from council.models.subscriptions import (  # noqa: E402
-    TierName,
-    get_tier,
-    is_within_run_limit,
 )
 from council.db.session import get_engine, get_session_ctx
 
@@ -164,7 +156,7 @@ app.add_middleware(
     allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Requested-With", "clerk-session-id"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
 )
 
 
@@ -181,55 +173,8 @@ async def add_security_headers(request: Request, call_next):  # type: ignore[typ
 
 @app.middleware("http")
 async def add_rate_limit_headers(request: Request, call_next):  # type: ignore[type-arg]
-    """Inject X-RateLimit-* headers on responses from run-creation and persona-creation endpoints.
-
-    The limit values are derived from the caller's subscription tier when the
-    Authorization header is present.  On unauthenticated requests the middleware
-    is a no-op so that 401 responses are unaffected.
-
-    Headers set:
-      X-RateLimit-Limit     — max runs allowed this calendar month for the tier
-      X-RateLimit-Remaining — runs remaining this month (clamped to 0)
-      X-RateLimit-Reset     — Unix timestamp (int) of the start of next calendar month (UTC)
-    """
-    # Only annotate rate-limited endpoints; skip everything else for performance.
-    rate_limited_paths = {"/runs", "/me/personas", "/me/personas/questionnaire"}
-    if request.method not in ("POST",) or request.url.path not in rate_limited_paths:
-        return await call_next(request)
-
-    auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
-    if not auth_header or not auth_header.lower().startswith("bearer "):
-        return await call_next(request)
-
-    response = await call_next(request)
-
-    # Resolve tier and usage counts — best-effort; never block the response.
-    try:
-        owner_id = "local"
-        limits = get_tier(TierName.ULTRA).limits
-        runs_limit = limits.runs_per_month
-
-        # Count runs this month for the caller.
-        all_runs = await run_store.list_runs(owner_id=owner_id)
-        used = _count_runs_this_month(all_runs)
-        remaining = max(0, runs_limit - used)
-
-        # Reset timestamp: start of next calendar month UTC.
-        now_utc = datetime.now(timezone.utc)
-        if now_utc.month == 12:
-            reset_dt = datetime(now_utc.year + 1, 1, 1, tzinfo=timezone.utc)
-        else:
-            reset_dt = datetime(now_utc.year, now_utc.month + 1, 1, tzinfo=timezone.utc)
-        reset_ts = int(reset_dt.timestamp())
-
-        response.headers["X-RateLimit-Limit"] = str(runs_limit)
-        response.headers["X-RateLimit-Remaining"] = str(remaining)
-        response.headers["X-RateLimit-Reset"] = str(reset_ts)
-    except Exception:
-        # Never let header injection break a successful response.
-        pass
-
-    return response
+    """Pass-through middleware. Rate limiting is handled at the application level."""
+    return await call_next(request)
 
 app.mount("/mcp", _mcp_app)
 
@@ -245,8 +190,6 @@ async def _run_worker_loop() -> None:
             run_kind = str((run.config or {}).get("run_kind") or "council").strip().lower()
             cfg = run.config or {}
             if run_kind == "sandbox":
-                if not get_tier(TierName.ULTRA).limits.computer_use_enabled:
-                    raise SandboxDisabledError("Computer-use sandbox requires Ultra or Enterprise.")
                 result = await run_sandbox_task(question=run.question, config=run.config)
             else:
                 # Inject the web_search tool into the council run if enabled for this run.
@@ -309,11 +252,9 @@ async def council_run(question: str, config: dict[str, Any] | None = None, api_k
 
 @_mcp.tool()
 async def sandbox_run(question: str, config: dict[str, Any] | None = None, api_key: str | None = None) -> dict[str, Any]:
-    """Create and enqueue an Ultra-only sandbox run."""
+    """Create and enqueue a sandbox run."""
     owner_id = _mcp_owner_id(api_key)
     _require_mcp_enabled(owner_id)
-    if not get_tier(TierName.ULTRA).limits.computer_use_enabled:
-        raise RuntimeError("Computer-use sandbox requires Ultra or Enterprise.")
     run_cfg = dict(config or {})
     run_cfg["run_kind"] = "sandbox"
     run = await run_store.create(question=question, config=run_cfg, owner_id=owner_id)
@@ -480,8 +421,7 @@ def _build_artifact_from_result(run_id: str, question: str, result: dict[str, An
 
 @dataclass
 class AuthenticatedUser:
-    user_id: str  # Clerk user ID or "api_key:<key_prefix>" or "dev"
-    tier: TierName
+    user_id: str  # User ID or "api_key:<key_prefix>" or "dev"
     auth_method: str = "api_secret"
 
     @property
@@ -497,7 +437,7 @@ AuthContext = AuthenticatedUser
 async def get_current_user(
     authorization: Annotated[str | None, Header()] = None,
 ) -> AuthenticatedUser:
-    """Return the local admin user. Optionally enforces API_SECRET_KEY if set."""
+    """Return the authenticated user. Optionally enforces API_SECRET_KEY if set."""
     api_secret = os.getenv("API_SECRET_KEY", "")
     if api_secret:
         token = ""
@@ -505,29 +445,11 @@ async def get_current_user(
             token = authorization[7:].strip()
         if not hmac.compare_digest(token.encode(), api_secret.encode()):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-    return AuthenticatedUser(user_id="local", tier=TierName.ULTRA, auth_method="none")
+    return AuthenticatedUser(user_id="local", auth_method="none")
 
 
 # Keep require_auth as an alias for backward compatibility with any internal callers.
 require_auth = get_current_user
-
-
-def require_tier(auth: AuthenticatedUser, minimum: TierName) -> None:
-    """Raise HTTP 403 if the authenticated user's tier is below *minimum*.
-
-    Tier order: trial < basic < pro < ultra < enterprise.
-    """
-    from council.models.subscriptions import TIER_ORDER
-    current_idx = TIER_ORDER.index(auth.tier)
-    minimum_idx = TIER_ORDER.index(minimum)
-    if current_idx < minimum_idx:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
-                f"Your current plan ('{auth.tier.value}') does not include this feature. "
-                f"Upgrade to '{minimum.value}' or higher to unlock it."
-            ),
-        )
 
 
 def _count_runs_this_month(runs: list[Run]) -> int:
@@ -617,54 +539,7 @@ async def create_run(
     Returns the run record in PENDING status immediately.
     Poll ``GET /runs/{run_id}`` to track progress.
     """
-    limits = get_tier(auth.tier).limits
-    current_runs = _count_runs_this_month(await run_store.list_runs(owner_id=auth.owner_id))
-    if not is_within_run_limit(auth.tier, current_runs):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=(
-                f"Monthly run limit reached for tier '{auth.tier.value}'. "
-                f"Limit: {limits.runs_per_month}."
-            ),
-        )
-
     cfg = body.config.model_dump(mode="python", exclude_none=True)
-    requested_agents = int(cfg.get("num_agents", 0) or 0)
-    if requested_agents and requested_agents > limits.max_agents:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"num_agents={requested_agents} exceeds tier limit "
-                f"({limits.max_agents}) for '{auth.tier.value}'."
-            ),
-        )
-
-    requested_rounds = int(cfg.get("num_rounds", 0) or cfg.get("rounds", 0) or 0)
-    if requested_rounds and requested_rounds > limits.max_rounds:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"num_rounds={requested_rounds} exceeds tier limit "
-                f"({limits.max_rounds}) for '{auth.tier.value}'."
-            ),
-        )
-
-    requested_tokens = int(cfg.get("max_input_tokens", 0) or 0)
-    if requested_tokens and requested_tokens > limits.max_input_tokens:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"max_input_tokens={requested_tokens} exceeds tier limit "
-                f"({limits.max_input_tokens}) for '{auth.tier.value}'."
-            ),
-        )
-
-    # Enforce tier gates for optional features — server-side regardless of client input.
-    if body.web_search_enabled:
-        require_tier(auth, TierName.PRO)
-
-    if body.computer_use_enabled:
-        require_tier(auth, TierName.ULTRA)
 
     # Validate sandbox_cmd early to surface errors before enqueuing.
     if cfg.get("sandbox_cmd"):
@@ -778,7 +653,7 @@ async def get_run_artifact(
 
 @app.get(
     "/runs/{run_id}/sandbox/stream",
-    summary="Get the E2B Desktop VNC stream URL for a computer-use run",
+    summary="Get the Desktop VNC stream URL for a computer-use run",
 )
 async def get_sandbox_stream(
     run_id: str,
@@ -787,10 +662,8 @@ async def get_sandbox_stream(
     """Return the VNC stream URL for the Desktop sandbox attached to this run.
 
     The sandbox is created on demand if it does not yet exist.
-    Requires Ultra or Enterprise tier and ``computer_use_enabled=true`` on the run.
+    Requires ``computer_use_enabled=true`` on the run.
     """
-    require_tier(auth, TierName.ULTRA)
-
     try:
         run = await run_store.get(run_id)
     except RunNotFoundError:
@@ -818,31 +691,34 @@ async def get_sandbox_stream(
 
 @app.get(
     "/me/entitlements",
-    summary="Get current subscription tier and limits",
+    summary="Get available features",
 )
 async def get_entitlements(
     auth: Annotated[AuthContext, Depends(require_auth)],
 ) -> dict[str, Any]:
-    tier = get_tier(auth.tier)
+    """Return the available features for self-hosted instance.
+    
+    All features are available in self-hosted deployments.
+    """
     return {
-        "tier": tier.name.value,
-        "display_name": tier.display_name,
+        "tier": "open-source",
+        "display_name": "Open Source",
         "limits": {
-            "runs_per_month": tier.limits.runs_per_month,
-            "max_agents": tier.limits.max_agents,
-            "max_rounds": tier.limits.max_rounds,
-            "max_input_tokens": tier.limits.max_input_tokens,
-            "max_saved_personas": tier.limits.max_saved_personas,
+            "runs_per_month": None,
+            "max_agents": None,
+            "max_rounds": None,
+            "max_input_tokens": None,
+            "max_saved_personas": None,
         },
         "features": {
-            "api_access": tier.limits.api_access,
-            "mcp_enabled": tier.limits.mcp_enabled,
-            "custom_mcp_enabled": tier.limits.custom_mcp_enabled,
-            "ide_plugins_enabled": tier.limits.ide_plugins_enabled,
-            "web_search_enabled": tier.limits.web_search_enabled,
-            "computer_use_enabled": tier.limits.computer_use_enabled,
-            "sso_enabled": tier.limits.sso_enabled,
-            "centralized_billing_enabled": tier.limits.centralized_billing_enabled,
+            "api_access": True,
+            "mcp_enabled": True,
+            "custom_mcp_enabled": True,
+            "ide_plugins_enabled": True,
+            "web_search_enabled": True,
+            "computer_use_enabled": True,
+            "sso_enabled": True,
+            "centralized_billing_enabled": False,
         },
     }
 
@@ -859,17 +735,17 @@ async def get_entitlements(
 
 @app.get(
     "/me/usage",
-    summary="Get month-to-date usage vs subscription limits",
+    summary="Get month-to-date usage",
 )
 async def get_usage(
     auth: Annotated[AuthContext, Depends(require_auth)],
 ) -> dict[str, Any]:
+    """Return month-to-date usage. No limits are enforced in self-hosted mode."""
     runs = await run_store.list_runs(owner_id=auth.owner_id)
     month_runs = _count_runs_this_month(runs)
-    limits = get_tier(auth.tier).limits
     return {
         "period": "monthly",
-        "runs": {"used": month_runs, "limit": limits.runs_per_month},
+        "runs": {"used": month_runs},
     }
 
 
@@ -1019,25 +895,12 @@ async def list_personas(
 @app.post(
     "/me/personas",
     status_code=status.HTTP_201_CREATED,
-    summary="Create a new persona (tier cap enforced)",
+    summary="Create a new persona",
 )
 async def create_persona(
     body: CreatePersonaRequest,
     auth: Annotated[AuthContext, Depends(require_auth)],
 ) -> dict[str, Any]:
-    limits = get_tier(auth.tier).limits
-    owned_count = sum(
-        1 for p in _persona_store.values()
-        if p.owner_id == auth.owner_id and not p.is_prebuilt
-    )
-    if limits.max_saved_personas is not None and owned_count >= limits.max_saved_personas:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=(
-                f"Persona limit ({limits.max_saved_personas}) reached "
-                f"for tier '{auth.tier.value}'. Upgrade to save more."
-            ),
-        )
     now = time.time()
     persona = PersonaRecord(
         persona_id=str(uuid.uuid4()),
@@ -1107,20 +970,6 @@ async def create_persona_from_questionnaire(
     body: QuestionnaireRequest,
     auth: Annotated[AuthContext, Depends(require_auth)],
 ) -> dict[str, Any]:
-    limits = get_tier(auth.tier).limits
-    owned_count = sum(
-        1 for p in _persona_store.values()
-        if p.owner_id == auth.owner_id and not p.is_prebuilt
-    )
-    if limits.max_saved_personas is not None and owned_count >= limits.max_saved_personas:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=(
-                f"Persona limit ({limits.max_saved_personas}) reached "
-                f"for tier '{auth.tier.value}'. Upgrade to save more."
-            ),
-        )
-
     questionnaire_payload = {
         "identity": body.identity,
         "cognition": body.cognition,
@@ -1206,17 +1055,12 @@ async def get_council_config(
     auth: Annotated[AuthContext, Depends(require_auth)],
 ) -> dict[str, Any]:
     _seed_prebuilt_personas(auth.owner_id)
-    limits = get_tier(auth.tier).limits
     config = _council_config_store.get(auth.owner_id, {})
     return {
-        "num_agents": config.get("num_agents", limits.max_agents),
+        "num_agents": config.get("num_agents"),
         "num_rounds": config.get("num_rounds", 4),
         "selected_persona_ids": config.get("selected_persona_ids", []),
         "model": config.get("model"),
-        "limits": {
-            "max_agents": limits.max_agents,
-            "max_rounds": limits.max_rounds,
-        },
     }
 
 
@@ -1225,23 +1069,12 @@ async def update_council_config(
     body: CouncilConfigRequest,
     auth: Annotated[AuthContext, Depends(require_auth)],
 ) -> dict[str, Any]:
-    limits = get_tier(auth.tier).limits
     config = _council_config_store.get(auth.owner_id, {})
 
     if body.num_agents is not None:
-        if body.num_agents > limits.max_agents:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"num_agents={body.num_agents} exceeds tier limit ({limits.max_agents}).",
-            )
         config["num_agents"] = body.num_agents
 
     if body.num_rounds is not None:
-        if body.num_rounds > limits.max_rounds:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"num_rounds={body.num_rounds} exceeds tier limit ({limits.max_rounds}).",
-            )
         config["num_rounds"] = body.num_rounds
 
     if body.selected_persona_ids is not None:
@@ -1254,14 +1087,10 @@ async def update_council_config(
 
     _council_config_store[auth.owner_id] = config
     return {
-        "num_agents": config.get("num_agents", limits.max_agents),
+        "num_agents": config.get("num_agents"),
         "num_rounds": config.get("num_rounds", 4),
         "selected_persona_ids": config.get("selected_persona_ids", []),
         "model": config.get("model"),
-        "limits": {
-            "max_agents": limits.max_agents,
-            "max_rounds": limits.max_rounds,
-        },
     }
 
 

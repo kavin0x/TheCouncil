@@ -125,26 +125,7 @@ Next.js 16 with React 19, Tailwind CSS 4, TanStack Query, and Radix UI. Uses App
 
 TypeScript types in `web/lib/api.ts` mirror the Python Pydantic models — keep them in sync when changing backend schemas.
 
-Auth is handled by `@clerk/nextjs` 7.2.3. `web/middleware.ts` uses `clerkMiddleware()` to protect app routes (`/dashboard`, `/runs`, `/personas`, `/usage`, `/settings`, `/integrations`). `web/app/layout.tsx` wraps `<body>` in `<ClerkProvider>`. See the **Authentication** section below for the full auth architecture.
-
-### Authentication
-
-Three-tier auth stack (tried in order by the `get_current_user` FastAPI dependency):
-
-1. **Clerk JWT** (browser) — `@clerk/nextjs` session tokens, validated via JWKS (RS256, validates `exp` + `iss` + `sub`). `CLERK_ISSUER_URL` must be set.
-2. **API Keys** (programmatic/CLI) — user-generated `tc_live_...` keys, sha256-hashed in the `api_keys` DB table. Users create these from `/settings` in the dashboard.
-3. **API_SECRET_KEY** (dev fallback) — single static key used when `CLERK_ISSUER_URL` is not configured.
-
-Backend auth dataclass: `AuthenticatedUser` with fields `user_id` (Clerk `sub` claim or `owner_id`), `tier`, and `auth_method`.
-JWT-shaped tokens that fail Clerk verification now hard-fail instead of falling through to API-secret auth.
-
-API key endpoints:
-
-- `POST /me/api-keys` — generate a new key (body: `{name?: string}`); plaintext returned once only
-- `GET /me/api-keys` — list active keys (no plaintext)
-- `DELETE /me/api-keys/{key_id}` — revoke a key
-
-Frontend auth helpers (`web/lib/auth.tsx`): `useAuth()` exposes `getToken: () => Promise<string | null>`, `isLoading`, and `logout`. All `api.*` methods in `web/lib/api.ts` accept `getToken` (not a raw string token).
+**Authentication:** Currently uses a simple bearer token (`API_SECRET_KEY`) for development. For production, integrate your preferred auth system (OAuth2, JWT, API keys, etc.). The backend `get_current_user()` dependency extracts the user ID from the bearer token and validates it against configured secrets or API key hashes.
 
 ### MCP Server
 
@@ -155,21 +136,12 @@ A FastMCP server is mounted at `/mcp` on the FastAPI app, exposing council debat
 ```bash
 OPENROUTER_API_KEY=...          # Primary LLM provider
 XAI_API_KEY=...                 # Optional: native Grok (cheaper)
-API_SECRET_KEY=...              # Dev fallback bearer token (used when CLERK_ISSUER_URL is not set)
+API_SECRET_KEY=...              # Dev bearer token (min 32 chars in production)
 DATABASE_URL=postgresql+asyncpg://council:council@localhost:5432/council
 REDIS_URL=redis://localhost:6379/0
 CELERY_BROKER_URL=redis://localhost:6379/1
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
-STRIPE_SECRET_KEY=...           # Payments
-TAVILY_API_KEY=...              # Web search (Pro+ tier)
-E2B_API_KEY=...                 # Desktop sandbox (Ultra+ tier)
+TAVILY_API_KEY=...              # Optional: web search capability
 COUNCIL_DISABLE_WORKER=0        # 1 = run Celery in-process
 COUNCIL_GUARDRAILS=1            # 0 = disable content guardrails
-
-# Clerk auth (backend)
-CLERK_ISSUER_URL=https://your-clerk-domain.clerk.accounts.dev  # Backend JWT validation via JWKS
-CLERK_SECRET_KEY=sk_...                                        # Optional: Clerk backend SDK
-
-# Clerk auth (frontend — web/.env.local)
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_...                       # Frontend Clerk init
 ```

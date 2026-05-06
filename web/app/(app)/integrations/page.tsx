@@ -134,7 +134,7 @@ export default function IntegrationsPage() {
               .
             </p>
             <p className="text-sm text-zinc-500">
-              Use the <code className="rounded bg-zinc-800 px-1">tc_live_...</code> key as the Bearer token — your Clerk session is for the browser only.
+              Use the <code className="rounded bg-zinc-800 px-1">tc_live_...</code> key as the Bearer token.
             </p>
           </div>
 

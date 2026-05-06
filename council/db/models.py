@@ -281,7 +281,7 @@ class ApiKey(Base):
     __tablename__ = "api_keys"
 
     id: str = Column(String(36), primary_key=True, default=_uuid)
-    # Clerk user ID (e.g. "user_2xyz...")
+    # User ID (from your authentication system)
     owner_id: str = Column(String(255), nullable=False, index=True)
     # Human label e.g. "My CLI key"
     name: str = Column(String(100), nullable=False, default="Default")
