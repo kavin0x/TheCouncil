@@ -37,18 +37,13 @@ import hmac
 import json
 import logging
 import os
-import re
-import secrets
 import time
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from functools import lru_cache
 from typing import Annotated, Any
 
-import jwt  # PyJWT
-from jwt import PyJWKClient
 
 logger = logging.getLogger(__name__)
 
@@ -84,66 +79,19 @@ from council.models.subscriptions import (  # noqa: E402
     TierName,
     get_tier,
     is_within_run_limit,
-    parse_webhook_event,
-    resolve_tier_from_webhook,
 )
 from council.db.session import get_engine, get_session_ctx
 
 logger = logging.getLogger(__name__)
 
 
-def _get_api_secret() -> str:
-    """Return the configured API secret key, raising if absent."""
-    secret = os.getenv("API_SECRET_KEY", "")
-    if not secret:
-        raise RuntimeError(
-            "API_SECRET_KEY environment variable is not set. "
-            "Set it before starting the server."
-        )
-    return secret
-
-
 def _validate_environment() -> None:
     """Validate required environment variables are present, raising RuntimeError if not."""
-    if not os.getenv("API_SECRET_KEY", ""):
-        raise RuntimeError(
-            "API_SECRET_KEY environment variable is not set. "
-            "Set it before starting the server."
-        )
     if not os.getenv("OPENROUTER_API_KEY", ""):
         raise RuntimeError(
             "OPENROUTER_API_KEY environment variable is not set. "
             "Set it before starting the server."
         )
-    clerk_url = os.getenv("CLERK_ISSUER_URL", "").rstrip("/")
-    if clerk_url and not re.match(
-        r"^https://[a-zA-Z0-9-]+\.(clerk\.accounts\.dev|clerk\.com)$", clerk_url
-    ):
-        raise RuntimeError(
-            f"CLERK_ISSUER_URL '{clerk_url}' does not match the expected Clerk domain pattern "
-            "(https://<tenant>.clerk.accounts.dev or https://<tenant>.clerk.com)."
-        )
-
-
-def _resolve_request_tier() -> TierName:
-    """Resolve caller tier from env for now; DB-backed mapping comes next."""
-    raw = os.getenv("DEFAULT_SUBSCRIPTION_TIER", TierName.BASIC.value).strip().lower()
-    try:
-        return TierName(raw)
-    except ValueError:
-        return TierName.BASIC
-
-
-@dataclass(frozen=True)
-class BearerIdentity:
-    """Resolved identity for a bearer token."""
-
-    user_id: str
-    auth_method: str
-
-
-class _InvalidBearerTokenError(RuntimeError):
-    """Raised when a JWT-shaped token fails verification and must not fall through."""
 
 
 def _allow_legacy_websocket_query_token() -> bool:
@@ -164,126 +112,9 @@ def _extract_websocket_token(websocket: WebSocket) -> tuple[str, bool]:
     return "", False
 
 
-# ---------------------------------------------------------------------------
-# Clerk JWT verification
-# ---------------------------------------------------------------------------
-
-
-# Lazy singleton — fetches JWKS once per process and caches.
-@lru_cache(maxsize=1)
-def _get_jwks_client() -> "PyJWKClient | None":
-    issuer = os.getenv("CLERK_ISSUER_URL", "").rstrip("/")
-    if not issuer:
-        return None
-    return PyJWKClient(f"{issuer}/.well-known/jwks.json", cache_jwk_set=True, lifespan=3600)
-
-
-def _verify_clerk_jwt(token: str) -> str | None:
-    """Validate a Clerk JWT and return the Clerk user ID (sub claim), or None on failure."""
-    client = _get_jwks_client()
-    if client is None:
-        return None
-    try:
-        signing_key = client.get_signing_key_from_jwt(token)
-        issuer = os.getenv("CLERK_ISSUER_URL", "").rstrip("/")
-        data = jwt.decode(
-            token,
-            signing_key.key,
-            algorithms=["RS256"],
-            options={"require": ["exp", "sub", "iss"]},
-            issuer=issuer,
-        )
-        return data.get("sub")  # Clerk user ID
-    except Exception:
-        return None
-
-
-async def _verify_api_key(raw_key: str) -> str | None:
-    """Look up a hashed API key in the DB and return its owner_id, or None."""
-    from council.db.models import ApiKey as ApiKeyModel
-    from sqlalchemy import select
-
-    engine = get_engine()
-    if engine is None:
-        return None
-    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
-    try:
-        async with get_session_ctx() as session:
-            result = await session.execute(
-                select(ApiKeyModel)
-                .where(ApiKeyModel.__table__.c.key_hash == key_hash)
-                .where(ApiKeyModel.__table__.c.is_active.is_(True))
-            )
-            api_key = result.scalar_one_or_none()
-            if api_key is None:
-                return None
-            # Update last_used_at asynchronously (fire-and-forget style)
-            api_key.last_used_at = time.time()
-            await session.commit()
-            return api_key.owner_id
-    except Exception:
-        return None
-
-
-async def _resolve_bearer_identity(
-    token: str,
-    *,
-    allow_dev_fallback: bool = True,
-) -> BearerIdentity | None:
-    """Resolve a bearer token to a user identity.
-
-    JWT-shaped tokens that fail verification raise _InvalidBearerTokenError so they
-    never fall through to unrelated auth paths.
-    """
-    if token.startswith("eyJ"):
-        user_id = _verify_clerk_jwt(token)
-        if user_id:
-            return BearerIdentity(user_id=user_id, auth_method="clerk_jwt")
-        raise _InvalidBearerTokenError("Invalid credentials")
-
-    if token.startswith("tc_"):
-        owner_id = await _verify_api_key(token)
-        if owner_id:
-            return BearerIdentity(user_id=owner_id, auth_method="api_key")
-
-    if allow_dev_fallback:
-        try:
-            api_secret = _get_api_secret()
-            if secrets.compare_digest(token, api_secret):
-                return BearerIdentity(user_id="dev", auth_method="api_secret")
-        except RuntimeError:
-            pass
-
-    return None
-
-
-def _mcp_bearer_from_request() -> str | None:
-    """Read Bearer token from the current MCP HTTP request (no FastMCP HTTP auth layer).
-
-    Streamable HTTP must allow initialize/list_tools without rejecting the connection;
-    tools validate the same API key as REST. Next.js rewrites also omit Authorization
-    unless the app proxies explicitly — use the forwarded header here.
-    """
-    try:
-        request = get_http_request()
-    except RuntimeError:
-        return None
-    auth = request.headers.get("authorization") or request.headers.get("Authorization")
-    if auth and auth.lower().startswith("bearer "):
-        return auth[7:].strip()
-    return None
-
-
-def _mcp_owner_id(api_key: str | None) -> str:
-    """Resolve owner from optional tool arg or Authorization: Bearer (same as REST API key)."""
-    if api_key:
-        return api_key
-    bearer = _mcp_bearer_from_request()
-    if bearer:
-        return bearer
-    raise RuntimeError(
-        "Authentication required. Set Authorization: Bearer <API_SECRET_KEY> in MCP config (same key as the REST API)."
-    )
+def _mcp_owner_id(api_key: str | None = None) -> str:
+    """Return the local owner ID for MCP tool calls."""
+    return "local"
 
 
 @asynccontextmanager
@@ -374,16 +205,8 @@ async def add_rate_limit_headers(request: Request, call_next):  # type: ignore[t
 
     # Resolve tier and usage counts — best-effort; never block the response.
     try:
-        token = auth_header[7:].strip()
-
-        identity = await _resolve_bearer_identity(token)
-        if identity is None:
-            return response
-
-        owner_id = identity.user_id
-
-        tier = _resolve_request_tier()
-        limits = get_tier(tier).limits
+        owner_id = "local"
+        limits = get_tier(TierName.ULTRA).limits
         runs_limit = limits.runs_per_month
 
         # Count runs this month for the caller.
@@ -422,8 +245,7 @@ async def _run_worker_loop() -> None:
             run_kind = str((run.config or {}).get("run_kind") or "council").strip().lower()
             cfg = run.config or {}
             if run_kind == "sandbox":
-                tier = _resolve_request_tier()
-                if not get_tier(tier).limits.computer_use_enabled:
+                if not get_tier(TierName.ULTRA).limits.computer_use_enabled:
                     raise SandboxDisabledError("Computer-use sandbox requires Ultra or Enterprise.")
                 result = await run_sandbox_task(question=run.question, config=run.config)
             else:
@@ -472,13 +294,7 @@ async def _run_worker_loop() -> None:
 
 
 def _require_mcp_enabled(owner_id: str) -> None:
-    tier = _resolve_request_tier()
-    limits = get_tier(tier).limits
-    if not limits.mcp_enabled:
-        raise RuntimeError("MCP integrations require Pro, Ultra, or Enterprise.")
-    expected = _get_api_secret()
-    if not secrets.compare_digest(owner_id, expected):
-        raise RuntimeError("Invalid API token.")
+    pass  # MCP is always enabled for self-hosted instances
 
 
 @_mcp.tool()
@@ -496,8 +312,7 @@ async def sandbox_run(question: str, config: dict[str, Any] | None = None, api_k
     """Create and enqueue an Ultra-only sandbox run."""
     owner_id = _mcp_owner_id(api_key)
     _require_mcp_enabled(owner_id)
-    tier = _resolve_request_tier()
-    if not get_tier(tier).limits.computer_use_enabled:
+    if not get_tier(TierName.ULTRA).limits.computer_use_enabled:
         raise RuntimeError("Computer-use sandbox requires Ultra or Enterprise.")
     run_cfg = dict(config or {})
     run_cfg["run_kind"] = "sandbox"
@@ -682,35 +497,15 @@ AuthContext = AuthenticatedUser
 async def get_current_user(
     authorization: Annotated[str | None, Header()] = None,
 ) -> AuthenticatedUser:
-    """Resolve caller identity from Bearer token.
-
-    Priority:
-    1. Clerk JWT  (if CLERK_ISSUER_URL is set and token is a JWT)
-    2. User API key (tc_live_... stored hashed in DB)
-    3. API_SECRET_KEY dev fallback
-    """
-    if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing Authorization credentials",
-        )
-
-    token = authorization[7:].strip()
-    # Resolve bearer identity centrally so JWT failures never fall through to
-    # unrelated auth methods.
-    try:
-        identity = await _resolve_bearer_identity(token)
-    except _InvalidBearerTokenError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-
-    if identity is not None:
-        return AuthenticatedUser(
-            user_id=identity.user_id,
-            tier=_resolve_request_tier(),
-            auth_method=identity.auth_method,
-        )
-
-    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    """Return the local admin user. Optionally enforces API_SECRET_KEY if set."""
+    api_secret = os.getenv("API_SECRET_KEY", "")
+    if api_secret:
+        token = ""
+        if authorization and authorization.lower().startswith("bearer "):
+            token = authorization[7:].strip()
+        if not hmac.compare_digest(token.encode(), api_secret.encode()):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    return AuthenticatedUser(user_id="local", tier=TierName.ULTRA, auth_method="none")
 
 
 # Keep require_auth as an alias for backward compatibility with any internal callers.
@@ -1053,58 +848,8 @@ async def get_entitlements(
 
 
 # ---------------------------------------------------------------------------
-# Stripe webhook endpoint
+# Personas — in-memory store
 # ---------------------------------------------------------------------------
-
-
-@app.post(
-    "/webhooks/stripe",
-    include_in_schema=False,
-    summary="Stripe webhook receiver",
-)
-async def stripe_webhook(request: Request) -> JSONResponse:
-    """Receive and process Stripe webhook events.
-
-    Verifies the Stripe-Signature header using STRIPE_WEBHOOK_SECRET.
-    Currently handles:
-          - ``checkout.session.completed`` (including Payment Links) → record tier/customer
-    """
-    payload = await request.body()
-    sig_header = request.headers.get("stripe-signature", "")
-    webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET", "")
-
-    if not webhook_secret:
-        # Allow unsigned webhooks only when explicitly opted-in (dev/test only).
-        if os.getenv("STRIPE_DISABLE_WEBHOOK_VERIFICATION", "") == "1":
-            logger.warning("STRIPE_DISABLE_WEBHOOK_VERIFICATION=1 — skipping Stripe signature check (dev/test only).")
-            try:
-                import json as _json
-                event = _json.loads(payload)
-            except Exception:
-                raise HTTPException(status_code=400, detail="Invalid JSON payload.")
-        else:
-            logger.error("STRIPE_WEBHOOK_SECRET not set; rejecting unsigned webhook POST.")
-            raise HTTPException(status_code=400, detail="Webhook verification required: STRIPE_WEBHOOK_SECRET is not configured.")
-    else:
-        try:
-            event = parse_webhook_event(payload, sig_header, webhook_secret)
-        except (ValueError, ImportError) as exc:
-            logger.warning("Stripe webhook verification failed: %s", exc)
-            raise HTTPException(status_code=400, detail="Webhook verification failed.")
-
-    event_type = event.get("type")
-
-    if event_type == "checkout.session.completed":
-        tier: TierName | None = resolve_tier_from_webhook(event)
-        customer_email = (
-            (event.get("data") or {}).get("object", {}).get("customer_email") or ""
-        )
-        # In a real system, persist tier → customer_email/customer_id mapping here.
-        # For now, log and acknowledge.
-        _ = tier  # used in future persistence layer
-        _ = customer_email
-
-    return JSONResponse(content={"received": True})
 
 
 # ---------------------------------------------------------------------------
@@ -1129,110 +874,7 @@ async def get_usage(
 
 
 # ---------------------------------------------------------------------------
-# Billing endpoints (stub — real Stripe integration follows Postgres migration)
-# ---------------------------------------------------------------------------
-
-
-class CheckoutRequest(BaseModel):
-    tier: str = Field(..., description="Target tier: basic | pro | ultra")
-    success_url: str = Field(..., description="Redirect URL after successful checkout")
-    cancel_url: str = Field(..., description="Redirect URL if checkout is cancelled")
-
-
-class PortalRequest(BaseModel):
-    return_url: str = Field(..., description="URL to return to after portal session")
-
-
-@app.get(
-    "/me/billing",
-    summary="Billing summary for the authenticated user",
-)
-async def get_billing(
-    auth: Annotated[AuthContext, Depends(require_auth)],
-) -> dict[str, Any]:
-    tier = get_tier(auth.tier)
-    return {
-        "tier": tier.name.value,
-        "display_name": tier.display_name,
-        "price_usd_monthly": tier.price_usd_monthly,
-        "status": "active",
-        "trial_end": None,
-        "next_renewal": None,
-        "stripe_customer_id": None,
-    }
-
-
-@app.post(
-    "/me/billing/checkout",
-    summary="Create a Stripe Checkout session for upgrading/subscribing",
-)
-async def create_checkout(
-    body: CheckoutRequest,
-    auth: Annotated[AuthContext, Depends(require_auth)],
-) -> dict[str, Any]:
-    try:
-        target = TierName(body.tier)
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Unknown tier: {body.tier!r}")
-    if target is TierName.TRIAL:
-        raise HTTPException(status_code=400, detail="Trial tier cannot be purchased.")
-
-    tier = get_tier(target)
-    price_id = tier.stripe_price_id
-    if not price_id:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Stripe price for '{target.value}' is not yet configured.",
-        )
-
-    try:
-        import stripe as _stripe  # type: ignore[import]
-    except ImportError:
-        raise HTTPException(status_code=503, detail="Stripe SDK not installed.")
-
-    session = _stripe.checkout.Session.create(
-        mode="subscription",
-        line_items=[{"price": price_id, "quantity": 1}],
-        success_url=body.success_url,
-        cancel_url=body.cancel_url,
-        metadata={"tier": target.value, "owner_id": auth.owner_id},
-    )
-    return {"url": session.url}
-
-
-@app.post(
-    "/me/billing/portal",
-    summary="Create a Stripe Customer Portal session",
-)
-async def create_portal(
-    body: PortalRequest,
-    auth: Annotated[AuthContext, Depends(require_auth)],
-) -> dict[str, Any]:
-    customer_id = os.getenv("STRIPE_DEV_CUSTOMER_ID", "")
-    if not customer_id:
-        raise HTTPException(
-            status_code=503,
-            detail="No Stripe customer associated with this account yet.",
-        )
-
-    try:
-        import stripe as _stripe  # type: ignore[import]
-    except ImportError:
-        logger.exception("Stripe SDK import failed in billing portal endpoint")
-        raise HTTPException(
-            status_code=503,
-            detail="Billing is temporarily unavailable. Please try again later.",
-        )
-
-    session = _stripe.billing_portal.Session.create(
-        customer=customer_id,
-        return_url=body.return_url,
-    )
-    return {"url": session.url}
-
-
-# ---------------------------------------------------------------------------
-# Personas — in-memory store (migrates to Postgres in Phase 1 DB work)
+# Personas — in-memory store
 # ---------------------------------------------------------------------------
 
 
@@ -1628,263 +1270,6 @@ async def update_council_config(
 # ---------------------------------------------------------------------------
 
 
-class ApiKeyCreate(BaseModel):
-    name: str = "Default"
-
-
-class ApiKeyResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    key_id: str
-    owner_id: str
-    name: str
-    key_prefix: str
-    created_at: float
-    last_used_at: float | None
-    is_active: bool
-
-
-class ApiKeyCreated(ApiKeyResponse):
-    """Includes plaintext key — returned only once at creation."""
-    plaintext_key: str
-
-
-@app.post("/me/api-keys", response_model=ApiKeyCreated, status_code=201)
-async def create_api_key(
-    body: ApiKeyCreate,
-    user: AuthenticatedUser = Depends(get_current_user),
-) -> ApiKeyCreated:
-    """Generate a new API key for the authenticated user. The plaintext key is returned only once."""
-    from council.db.models import ApiKey as ApiKeyModel
-
-    # Generate: "tc_live_" + 32 bytes hex = 72 chars total
-    raw = "tc_live_" + secrets.token_hex(32)
-    key_hash = hashlib.sha256(raw.encode()).hexdigest()
-    key_prefix = raw[:12]  # "tc_live_XXXX"
-
-    db_key = ApiKeyModel(
-        owner_id=user.user_id,
-        name=body.name,
-        key_hash=key_hash,
-        key_prefix=key_prefix,
-    )
-
-    engine = get_engine()
-    if engine is None:
-        raise HTTPException(status_code=503, detail="Database unavailable")
-
-    async with get_session_ctx() as session:
-        session.add(db_key)
-        await session.commit()
-        await session.refresh(db_key)
-
-    return ApiKeyCreated(
-        key_id=db_key.id,
-        owner_id=db_key.owner_id,
-        name=db_key.name,
-        key_prefix=db_key.key_prefix,
-        created_at=db_key.created_at,
-        last_used_at=db_key.last_used_at,
-        is_active=db_key.is_active,
-        plaintext_key=raw,
-    )
-
-
-@app.get("/me/api-keys", response_model=list[ApiKeyResponse])
-async def list_api_keys(
-    user: AuthenticatedUser = Depends(get_current_user),
-) -> list[ApiKeyResponse]:
-    """List all active API keys for the authenticated user (no plaintext returned)."""
-    from council.db.models import ApiKey as ApiKeyModel
-    from sqlalchemy import select
-
-    engine = get_engine()
-    if engine is None:
-        raise HTTPException(status_code=503, detail="Database unavailable")
-
-    async with get_session_ctx() as session:
-        result = await session.execute(
-            select(ApiKeyModel)
-            .where(ApiKeyModel.__table__.c.owner_id == user.user_id)
-            .where(ApiKeyModel.__table__.c.is_active.is_(True))
-            .order_by(ApiKeyModel.__table__.c.created_at.desc())
-        )
-        keys = result.scalars().all()
-
-    return [
-        ApiKeyResponse(
-            key_id=k.id,
-            owner_id=k.owner_id,
-            name=k.name,
-            key_prefix=k.key_prefix,
-            created_at=k.created_at,
-            last_used_at=k.last_used_at,
-            is_active=k.is_active,
-        )
-        for k in keys
-    ]
-
-
-@app.delete("/me/api-keys/{key_id}", status_code=204)
-async def revoke_api_key(
-    key_id: str,
-    user: AuthenticatedUser = Depends(get_current_user),
-) -> None:
-    """Revoke (soft-delete) an API key. Only the key owner can revoke it."""
-    from council.db.models import ApiKey as ApiKeyModel
-    from sqlalchemy import select
-
-    engine = get_engine()
-    if engine is None:
-        raise HTTPException(status_code=503, detail="Database unavailable")
-
-    async with get_session_ctx() as session:
-        result = await session.execute(
-            select(ApiKeyModel).where(
-                ApiKeyModel.__table__.c.id == key_id,
-                ApiKeyModel.__table__.c.owner_id == user.user_id,
-            )
-        )
-        api_key = result.scalar_one_or_none()
-        if api_key is None:
-            raise HTTPException(status_code=404, detail="API key not found")
-        api_key.is_active = False
-        await session.commit()
-
-
-# ---------------------------------------------------------------------------
-# Legal — Terms of Service acceptance
-# ---------------------------------------------------------------------------
-
-# In-memory ToS acceptance store: owner_id -> {"accepted_at": float, "version": str}
-# In production this should be backed by the users table (tos_accepted_at / tos_version columns).
-_tos_store: dict[str, dict[str, str | float]] = {}
-
-# The canonical current ToS version string.  Bump this date when the ToS is updated
-# so that users who previously accepted are required to re-accept.
-CURRENT_TOS_VERSION = "2026-04-01"
-
-
-class AcceptTosRequest(BaseModel):
-    """Body for POST /api/legal/accept."""
-
-    version: str = Field(
-        default=CURRENT_TOS_VERSION,
-        description="Version string of the ToS being accepted (e.g. '2026-04-01').",
-    )
-
-
-@app.post(
-    "/api/legal/accept",
-    status_code=status.HTTP_200_OK,
-    summary="Record acceptance of the Terms of Service",
-    tags=["legal"],
-)
-async def accept_tos(
-    body: AcceptTosRequest,
-    auth: Annotated[AuthContext, Depends(require_auth)],
-) -> dict[str, str | float | None]:
-    """Record that the authenticated user has accepted the Terms of Service.
-
-    Stores the acceptance timestamp and the version string they agreed to.
-    Subsequent calls overwrite the previous record (re-acceptance on version bump).
-
-    Returns the stored acceptance record.
-    """
-    if body.version != CURRENT_TOS_VERSION:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Unknown ToS version '{body.version}'. Current version is '{CURRENT_TOS_VERSION}'.",
-        )
-    accepted_at = time.time()
-
-    engine = get_engine()
-    if engine is not None:
-        from council.db.models import TosAcceptance
-        from sqlalchemy.dialects.postgresql import insert as pg_insert
-        async with get_session_ctx() as session:
-            stmt = pg_insert(TosAcceptance).values(
-                owner_id=auth.owner_id,
-                version=body.version,
-                accepted_at=accepted_at,
-            ).on_conflict_do_update(
-                index_elements=["owner_id"],
-                set_={"version": body.version, "accepted_at": accepted_at},
-            )
-            await session.execute(stmt)
-            await session.commit()
-    else:
-        _tos_store[auth.owner_id] = {
-            "owner_id": auth.owner_id,
-            "version": body.version,
-            "accepted_at": accepted_at,
-        }
-
-    return {
-        "tos_accepted": True,
-        "version": body.version,
-        "accepted_at": accepted_at,
-    }
-
-
-@app.get(
-    "/api/legal/status",
-    status_code=status.HTTP_200_OK,
-    summary="Check current Terms of Service acceptance status",
-    tags=["legal"],
-)
-async def get_tos_status(
-    auth: Annotated[AuthContext, Depends(require_auth)],
-) -> dict[str, str | float | bool | None]:
-    """Return whether the authenticated user has accepted the current ToS.
-
-    ``tos_accepted`` is ``True`` only when the stored version matches
-    ``CURRENT_TOS_VERSION``.  If the ToS has been updated since last acceptance
-    ``tos_accepted`` will be ``False`` and ``current_version`` indicates what
-    must be accepted.
-    """
-    engine = get_engine()
-    if engine is not None:
-        from council.db.models import TosAcceptance
-        from sqlalchemy import select
-        async with get_session_ctx() as session:
-            result = await session.execute(
-                select(TosAcceptance).where(
-                    TosAcceptance.__table__.c.owner_id == auth.owner_id
-                )
-            )
-            row = result.scalar_one_or_none()
-        if row is None:
-            return {
-                "tos_accepted": False,
-                "current_version": CURRENT_TOS_VERSION,
-                "accepted_version": None,
-                "accepted_at": None,
-            }
-        return {
-            "tos_accepted": row.version == CURRENT_TOS_VERSION,
-            "current_version": CURRENT_TOS_VERSION,
-            "accepted_version": row.version,
-            "accepted_at": row.accepted_at,
-        }
-
-    # DB unavailable — fall back to in-memory store
-    record = _tos_store.get(auth.owner_id)
-    if record is None:
-        return {
-            "tos_accepted": False,
-            "current_version": CURRENT_TOS_VERSION,
-            "accepted_version": None,
-            "accepted_at": None,
-        }
-    accepted_version = str(record.get("version", ""))
-    return {
-        "tos_accepted": accepted_version == CURRENT_TOS_VERSION,
-        "current_version": CURRENT_TOS_VERSION,
-        "accepted_version": accepted_version,
-        "accepted_at": record.get("accepted_at"),
-    }
-
-
 # ---------------------------------------------------------------------------
 # Health check
 # ---------------------------------------------------------------------------
@@ -1944,16 +1329,12 @@ async def internal_run_events(request: Request) -> JSONResponse:
 
     Same bearer token as the public API. Used only when ``COUNCIL_API_EVENT_BRIDGE_URL`` is set on the worker.
     """
-    auth = request.headers.get("Authorization") or ""
-    if not auth.lower().startswith("bearer "):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
-    token = auth[7:].strip()
-    try:
-        expected = _get_api_secret()
-    except RuntimeError:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Server misconfigured")
-    if not secrets.compare_digest(token, expected):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+    api_secret = os.getenv("API_SECRET_KEY", "")
+    if api_secret:
+        auth = request.headers.get("Authorization") or ""
+        token = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+        if not hmac.compare_digest(token.encode(), api_secret.encode()):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
     try:
         body = await request.json()
     except Exception:
@@ -1983,33 +1364,12 @@ async def run_websocket(websocket: WebSocket, run_id: str) -> None:
     """
     token, _ws_use_subprotocol = _extract_websocket_token(websocket)
 
-    if not token:
-        await websocket.close(code=4001)
-        return
-
-    try:
-        identity = await _resolve_bearer_identity(token)
-    except _InvalidBearerTokenError:
-        await websocket.close(code=4001)
-        return
-
-    if identity is None:
-        await websocket.close(code=4001)
-        return
-
-    user_id = identity.user_id
-
     try:
         run = await run_store.get(run_id)
     except RunNotFoundError:
         await websocket.close(code=4004)
         return
 
-    if run.owner_id and run.owner_id != user_id:
-        await websocket.close(code=4003)
-        return
-
-    # Echo subprotocol back so the browser doesn't close the connection.
     await websocket.accept(subprotocol=token if _ws_use_subprotocol else None)
 
     if run_id not in _ws_connections:
@@ -2146,7 +1506,7 @@ def _extract_run_id_from_topic(topic: str) -> str | None:
         zoom_run_secret.encode(), run_id.encode(), hashlib.sha256
     ).hexdigest()
 
-    if not secrets.compare_digest(expected_token, provided_token):
+    if not hmac.compare_digest(expected_token, provided_token):
         logger.warning("Zoom topic HMAC verification failed for run_id %r — ignoring.", run_id)
         return None
 

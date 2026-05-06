@@ -1,20 +1,9 @@
 "use client";
 
 import React from "react";
-import { useUser } from "@clerk/nextjs";
 import { Sidebar } from "@/components/sidebar";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const { isLoaded } = useUser();
-
-  if (!isLoaded) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-[#070b0f]">
-        <div className="h-5 w-5 animate-spin rounded-full border-2 border-violet-500 border-t-transparent" />
-      </div>
-    );
-  }
-
   return (
     <div className="flex h-screen overflow-hidden bg-[#070b0f]">
       <a

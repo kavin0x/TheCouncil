@@ -136,13 +136,12 @@ async function request<T>(
   retries: number = 3
 ): Promise<T> {
   const token = await getToken();
-  if (!token) {
-    const err = new Error("Not authenticated") as Error & { status: number };
-    err.status = 401;
-    throw err;
-  }
 
   let lastError: Error | null = null;
+
+  const authHeaders: Record<string, string> = token
+    ? { Authorization: `Bearer ${token}` }
+    : {};
 
   for (let attempt = 0; attempt < retries; attempt++) {
     try {
@@ -150,8 +149,8 @@ async function request<T>(
         ...options,
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          "X-Requested-With": "XMLHttpRequest", // CSRF protection
+          "X-Requested-With": "XMLHttpRequest",
+          ...authHeaders,
           ...(options?.headers ?? {}),
         },
       });
