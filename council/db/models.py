@@ -311,7 +311,7 @@ class ApiKey(Base):
 
 
 class TosAcceptance(Base):
-    """Persists per-user Terms of Service acceptance, keyed by owner_id (Clerk user ID)."""
+    """Persists per-user Terms of Service acceptance, keyed by owner_id (user ID from your auth system)."""
 
     __tablename__ = "tos_acceptances"
 

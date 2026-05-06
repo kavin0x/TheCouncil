@@ -109,10 +109,10 @@ def cmd_run(
         None, "--out", "-o", help="Write result JSON to this file."
     ),
     web_search: bool = typer.Option(
-        False, "--web-search/--no-web-search", help="Enable web search for agents (Pro+ only)."
+        False, "--web-search/--no-web-search", help="Enable web search for agents (requires TAVILY_API_KEY)."
     ),
     computer_use: bool = typer.Option(
-        False, "--computer-use/--no-computer-use", help="Enable E2B Desktop sandbox for computer-use tasks (Ultra+ only)."
+        False, "--computer-use/--no-computer-use", help="Enable Docker Desktop sandbox for computer-use tasks (requires Docker daemon)."
     ),
 ) -> None:
     """Run a council debate on QUESTION.
@@ -125,13 +125,13 @@ def cmd_run(
     else:
         if web_search:
             console.print(
-                "[yellow]Note:[/] --web-search is only effective when using --api "
-                "(local runs do not contact the backend tier system)."
+                "[yellow]Note:[/] --web-search requires TAVILY_API_KEY environment variable. "
+                "(local runs do not contact external APIs)."
             )
         if computer_use:
             console.print(
-                "[yellow]Note:[/] --computer-use is only effective when using --api "
-                "(local runs do not spawn E2B Desktop sandboxes)."
+                "[yellow]Note:[/] --computer-use requires Docker daemon running. "
+                "(local runs do not spawn Docker containers by default)."
             )
         _run_local(question, mode, agents, rounds, config_file, no_guardrails, output_file)
 
