@@ -6,14 +6,12 @@ import {
   Bot,
   Gauge,
   Key,
-  LogOut,
   Play,
   Puzzle,
   BarChart3,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
-import { UserButton } from "@clerk/nextjs";
 import { useQuery } from "@tanstack/react-query";
 import { api, type Entitlements } from "@/lib/api";
 import { Badge } from "@/components/ui";
@@ -22,7 +20,7 @@ const navItems = [
   { href: "/dashboard",    label: "Dashboard",       icon: Gauge },
   { href: "/runs",         label: "Runs",            icon: Play },
   { href: "/personas",     label: "Personas",        icon: Bot },
-  { href: "/usage",        label: "Usage & Billing", icon: BarChart3 },
+  { href: "/usage",        label: "Usage",           icon: BarChart3 },
   { href: "/settings",     label: "Settings",        icon: Key },
   { href: "/integrations", label: "Integrations",    icon: Puzzle },
 ];
@@ -41,7 +39,7 @@ function tierBadgeVariant(tier: string) {
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { getToken, logout } = useAuth();
+  const { getToken } = useAuth();
 
   const { data: ent } = useQuery<Entitlements>({
     queryKey: ["entitlements"],
@@ -106,30 +104,15 @@ export function Sidebar() {
 
       {/* Footer */}
       <div className="border-t border-zinc-800/60 p-2">
-        <div className="flex items-center gap-2.5 px-3 py-2">
-          <UserButton
-            appearance={{
-              elements: {
-                avatarBox: "h-6 w-6",
-              },
-            }}
-          />
-          <button
-            onClick={logout}
-            className="flex flex-1 items-center gap-2 text-xs text-zinc-600 hover:text-red-400 transition-colors"
+        <div className="px-3 py-2">
+          <a
+            href="https://github.com/kavin0x/TheCouncil"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[10px] text-zinc-700 hover:text-zinc-500 transition-colors"
           >
-            <LogOut className="h-3.5 w-3.5" />
-            Sign out
-          </button>
-        </div>
-        <div className="mt-1 flex items-center gap-3 px-3 py-1">
-          <Link href="/legal#tos" className="text-[10px] text-zinc-700 hover:text-zinc-500 transition-colors">
-            Terms
-          </Link>
-          <span className="text-zinc-800">·</span>
-          <Link href="/legal#privacy" className="text-[10px] text-zinc-700 hover:text-zinc-500 transition-colors">
-            Privacy
-          </Link>
+            GitHub · Apache 2.0
+          </a>
         </div>
       </div>
     </aside>

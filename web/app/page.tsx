@@ -102,12 +102,12 @@ export default function LandingPage() {
             >
               GitHub
             </Link>
-            <Link href="/login">
+            <Link href="/dashboard">
               <Button variant="outline" size="sm">
                 Sign in
               </Button>
             </Link>
-            <Link href="/login">
+            <Link href="/dashboard">
               <Button size="sm">
                 Get started
               </Button>
@@ -150,7 +150,7 @@ export default function LandingPage() {
             </p>
 
             <div className="flex items-center gap-3">
-              <Link href="/login">
+              <Link href="/dashboard">
                 <Button size="lg" className="gap-2">
                   Get started <ArrowRight className="h-4 w-4" />
                 </Button>
@@ -218,7 +218,7 @@ export default function LandingPage() {
             Deploy locally with Docker or directly with Python + Node. Apache 2.0 licensed.
           </p>
           <div className="flex items-center justify-center gap-3">
-            <Link href="/login">
+            <Link href="/dashboard">
               <Button size="lg">
                 Get started
               </Button>
