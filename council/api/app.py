@@ -492,11 +492,11 @@ class CreateRunRequest(BaseModel):
     )
     web_search_enabled: bool = Field(
         default=False,
-        description="Allow agents to call web search during deliberation (Pro+ only).",
+        description="Allow agents to call web search during deliberation (requires TAVILY_API_KEY).",
     )
     computer_use_enabled: bool = Field(
         default=False,
-        description="Spawn an E2B Desktop sandbox for computer-use tasks (Ultra+ only).",
+        description="Spawn a Docker sandbox for computer-use tasks (requires Docker daemon).",
     )
 
 

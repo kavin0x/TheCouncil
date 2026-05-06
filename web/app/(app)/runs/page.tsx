@@ -172,7 +172,7 @@ function CreateRunDialog({ entitlements }: { entitlements?: Entitlements }) {
             /* ── Computer-use sandbox panel ─────────────────────────── */
             <div className="space-y-4">
               <p className="text-sm text-zinc-300">
-                Run started. The E2B Desktop sandbox is live — open the link
+                Run started. The Docker sandbox is live — open the link
                 below to watch the agent work in real time.
               </p>
               <a
@@ -191,7 +191,7 @@ function CreateRunDialog({ entitlements }: { entitlements?: Entitlements }) {
                 <iframe
                   src={sandboxStreamUrl}
                   className="mt-2 h-64 w-full rounded-md border border-zinc-700"
-                  title="E2B Desktop sandbox"
+                  title="Docker sandbox stream"
                   sandbox="allow-scripts allow-same-origin allow-forms"
                 />
               </details>
