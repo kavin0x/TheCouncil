@@ -46,7 +46,7 @@ function CodeBlock({ code, lang = "json" }: { code: string; lang?: string }) {
   );
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "https://api.thecouncil.ai";
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 const MCP_BASE =
   typeof window !== "undefined"
     ? window.location.origin
@@ -223,26 +223,10 @@ ${JSON.stringify(
             </code>
             :
           </p>
-          <CodeBlock
-            code={JSON.stringify(
-              {
-                mcpServers: {
-                  thecouncil: {
-                    command: "npx",
-                    args: ["-y", "@thecouncil/mcp-client"],
-                    env: {
-                      THECOUNCIL_API_KEY: "YOUR_API_KEY",
-                      THECOUNCIL_API_URL: API_BASE,
-                    },
-                  },
-                },
-              },
-              null,
-              2
-            )}
-          />
+          <McpJsonSnippet apiKey="tc_live_YOUR_KEY" />
           <p className="text-xs text-zinc-600">
-            The npm package <code>@thecouncil/mcp-client</code> is coming soon (Phase 3). For now use the HTTP/SSE remote server config above.
+            Uses the same HTTP/SSE remote server config. Generate an API key from{" "}
+            <Link href="/settings" className="text-violet-400 hover:underline">Settings → API Keys</Link>.
           </p>
         </CardContent>
       </Card>
@@ -285,12 +269,12 @@ ${JSON.stringify(
       <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-5 py-4 text-sm text-zinc-400">
         Need help?{" "}
         <a
-          href="https://docs.thecouncil.ai/mcp"
+          href="https://github.com/kavin0x/TheCouncil"
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center gap-1 text-violet-400 hover:underline"
         >
-          Full MCP integration docs <ExternalLink className="h-3 w-3" />
+          GitHub repository <ExternalLink className="h-3 w-3" />
         </a>
       </div>
     </div>

@@ -330,11 +330,11 @@ export default function UsagePage() {
         </div>
 
         <p className="text-center text-xs text-zinc-600">
-          Enterprise pricing is per seat. Contact{" "}
-          <a href="mailto:sales@thecouncil.ai" className="text-violet-400 hover:underline">
-            sales@thecouncil.ai
+          Self-hosted — open a{" "}
+          <a href="https://github.com/kavin0x/TheCouncil/issues" className="text-violet-400 hover:underline">
+            GitHub issue
           </a>{" "}
-          for a quote.
+          for questions or feature requests.
         </p>
       </section>
     </div>
