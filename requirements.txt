@@ -37,4 +37,4 @@ python-multipart>=0.0.6
 structlog>=24.1.0
 python-json-logger>=2.0.7
 cryptography>=42.0.0
-PyJWT>=2.8.0
+PyJWT>=2.12.1
