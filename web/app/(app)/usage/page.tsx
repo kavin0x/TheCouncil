@@ -1,12 +1,10 @@
 "use client";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Check, ExternalLink } from "lucide-react";
-import { api, type Billing, type Entitlements, type Usage } from "@/lib/api";
+import { api, type Entitlements, type Usage } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import Link from "next/link";
 import {
-  Badge,
   Button,
   Card,
   CardContent,
@@ -17,43 +15,8 @@ import {
   Skeleton,
 } from "@/components/ui";
 
-const UPGRADE_TIERS = [
-  {
-    name: "Basic",
-    value: "basic",
-    price: "$10",
-    perks: ["100 runs/mo", "1 persona", "Web & API"],
-  },
-  {
-    name: "Pro",
-    value: "pro",
-    price: "$20",
-    perks: ["500 runs/mo", "10 personas", "MCP + IDE plugins"],
-    popular: true,
-  },
-  {
-    name: "Ultra",
-    value: "ultra",
-    price: "$200",
-    perks: ["10k runs/mo", "Unlimited personas", "Computer use"],
-  },
-];
-
-function statusBadge(status: string) {
-  const v = status === "active" ? "success" : status === "trialing" ? "warning" : "danger";
-  return <Badge variant={v}>{status}</Badge>;
-}
-
-function validateStripeUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    return ["stripe.com", "checkout.stripe.com", "billing.stripe.com"].some(
-      (domain) =>
-        parsed.hostname === domain || parsed.hostname.endsWith("." + domain)
-    );
-  } catch {
-    return false;
-  }
+function formatLimit(value: number | null | undefined): string {
+  return value === null || value === undefined ? "Unlimited" : value.toLocaleString();
 }
 
 export default function UsagePage() {
@@ -67,37 +30,6 @@ export default function UsagePage() {
     queryKey: ["usage"],
     queryFn: () => api.getUsage(getToken),
     refetchInterval: 30_000,
-  });
-  const billing = useQuery<Billing>({
-    queryKey: ["billing"],
-    queryFn: () => api.getBilling(getToken),
-  });
-
-  const portal = useMutation({
-    mutationFn: () => api.createPortal(getToken, window.location.href),
-    onSuccess: ({ url }) => {
-      if (validateStripeUrl(url)) {
-        window.location.assign(url);
-      } else {
-        console.error("Invalid redirect URL from portal API");
-      }
-    },
-  });
-
-  const checkout = useMutation({
-    mutationFn: (tier: string) =>
-      api.createCheckout(getToken, {
-        tier,
-        success_url: `${window.location.origin}/dashboard`,
-        cancel_url: window.location.href,
-      }),
-    onSuccess: ({ url }) => {
-      if (validateStripeUrl(url)) {
-        window.location.assign(url);
-      } else {
-        console.error("Invalid redirect URL from checkout API");
-      }
-    },
   });
 
   const sandboxRun = useMutation({
@@ -118,27 +50,25 @@ export default function UsagePage() {
 
   const computerUseEnabled = !!ent.data?.features.computer_use_enabled;
 
-  const loadError = ent.error || usage.error || billing.error;
+  const loadError = ent.error || usage.error;
   const refetchAll = () => {
     void ent.refetch();
     void usage.refetch();
-    void billing.refetch();
   };
   const isRefetching =
     (ent.isFetching && !ent.isLoading) ||
-    (usage.isFetching && !usage.isLoading) ||
-    (billing.isFetching && !billing.isLoading);
+    (usage.isFetching && !usage.isLoading);
 
   return (
     <div className="space-y-8">
       {loadError && (
         <QueryError
-          message="We couldn&apos;t load billing or usage. Check your connection and try again."
+          message="We couldn&apos;t load usage or feature access. Check your connection and try again."
           onRetry={refetchAll}
           isRetrying={isRefetching}
         />
       )}
-      <h1 className="text-2xl font-bold text-white">Usage & Billing</h1>
+      <h1 className="text-2xl font-bold text-white">Usage & Access</h1>
 
       {/* Usage section */}
       <section className="space-y-4">
@@ -170,7 +100,7 @@ export default function UsagePage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Plan limits</CardTitle>
+              <CardTitle>Feature limits</CardTitle>
             </CardHeader>
             <CardContent>
               {ent.isLoading ? (
@@ -178,13 +108,10 @@ export default function UsagePage() {
               ) : (
                 <dl className="space-y-1.5 text-sm">
                   {[
-                    ["Agents / run", ent.data?.limits.max_agents],
-                    ["Rounds / run", ent.data?.limits.max_rounds],
-                    ["Max tokens", ent.data?.limits.max_input_tokens?.toLocaleString()],
-                    [
-                      "Saved personas",
-                      ent.data?.limits.max_saved_personas ?? "Unlimited",
-                    ],
+                    ["Agents / run", formatLimit(ent.data?.limits.max_agents)],
+                    ["Rounds / run", formatLimit(ent.data?.limits.max_rounds)],
+                    ["Max tokens", formatLimit(ent.data?.limits.max_input_tokens)],
+                    ["Saved personas", formatLimit(ent.data?.limits.max_saved_personas)],
                   ].map(([label, val]) => (
                     <div key={String(label)} className="flex justify-between">
                       <dt className="text-zinc-500">{label}</dt>
@@ -203,11 +130,11 @@ export default function UsagePage() {
         <h2 className="text-sm font-semibold uppercase tracking-widest text-zinc-600">Computer-use sandbox</h2>
         <Card>
           <CardHeader>
-            <CardTitle>Ultra sandbox demo</CardTitle>
+            <CardTitle>Self-hosted sandbox demo</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-sm text-zinc-400">
-              Launch an isolated sandbox run (Ultra/Enterprise only). This is the foundation for CUA-style
+              Launch an isolated sandbox run in this deployment. This is the foundation for CUA-style
               computer-use workflows.
             </p>
             {computerUseEnabled ? (
@@ -229,113 +156,25 @@ export default function UsagePage() {
               </div>
             ) : (
               <p className="text-sm text-zinc-600">
-                Upgrade to Ultra to enable sandboxed computer-use features.
+                Computer-use sandboxing is not enabled for this deployment.
               </p>
             )}
           </CardContent>
         </Card>
       </section>
 
-      {/* Billing section */}
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold uppercase tracking-widest text-zinc-600">Billing</h2>
         <Card>
           <CardContent className="pt-5">
-            {billing.isLoading ? (
-              <Skeleton className="h-16 w-full" />
-            ) : (
-              <div className="flex flex-wrap items-center justify-between gap-4">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-white">
-                      {billing.data?.display_name} plan
-                    </span>
-                    {billing.data?.status && statusBadge(billing.data.status)}
-                  </div>
-                  <p className="text-sm text-zinc-400">
-                    ${billing.data?.price_usd_monthly}/month
-                  </p>
-                  {billing.data?.trial_end && (
-                    <p className="text-xs text-amber-400">
-                      Trial ends{" "}
-                      {new Date(billing.data.trial_end * 1000).toLocaleDateString()}
-                    </p>
-                  )}
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-2"
-                  onClick={() => portal.mutate()}
-                  disabled={portal.isPending || !billing.data?.stripe_customer_id}
-                >
-                  <ExternalLink className="h-3.5 w-3.5" />
-                  {portal.isPending ? "Opening…" : "Manage subscription"}
-                </Button>
-              </div>
-            )}
-            {!billing.data?.stripe_customer_id && !billing.isLoading && (
-              <p className="mt-3 text-xs text-zinc-600">
-                No active subscription — choose a plan below.
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-white">Open-source deployment</p>
+              <p className="text-sm text-zinc-400">
+                This instance exposes capability flags instead of paid-plan metadata. Use settings and
+                integrations to review the features available in this deployment.
               </p>
-            )}
+            </div>
           </CardContent>
         </Card>
-
-        {/* Upgrade CTAs */}
-        <div className="grid gap-4 sm:grid-cols-3">
-          {UPGRADE_TIERS.map((tier) => {
-            const isCurrent = ent.data?.tier === tier.value;
-            return (
-              <Card
-                key={tier.value}
-                className={
-                  tier.popular
-                    ? "border-violet-500/50 shadow-md shadow-violet-500/10 ring-1 ring-violet-500/20"
-                    : ""
-                }
-              >
-                <CardContent className="flex flex-col gap-3 pt-5">
-                  {tier.popular && (
-                    <Badge variant="default" className="self-start">Most popular</Badge>
-                  )}
-                  <div>
-                    <p className="text-base font-bold text-white">{tier.name}</p>
-                    <p className="text-lg font-extrabold text-white">
-                      {tier.price}
-                      <span className="text-xs font-normal text-zinc-500">/mo</span>
-                    </p>
-                  </div>
-                  <ul className="space-y-1.5 text-xs text-zinc-400">
-                    {tier.perks.map((p) => (
-                      <li key={p} className="flex items-center gap-1.5">
-                        <Check className="h-3 w-3 shrink-0 text-emerald-400" />
-                        {p}
-                      </li>
-                    ))}
-                  </ul>
-                  <Button
-                    variant={isCurrent ? "secondary" : tier.popular ? "default" : "outline"}
-                    size="sm"
-                    disabled={isCurrent || checkout.isPending}
-                    onClick={() => !isCurrent && checkout.mutate(tier.value)}
-                    className="mt-auto"
-                  >
-                    {isCurrent ? "Current plan" : `Upgrade to ${tier.name}`}
-                  </Button>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
-
-        <p className="text-center text-xs text-zinc-600">
-          Self-hosted — open a{" "}
-          <a href="https://github.com/kavin0x/TheCouncil/issues" className="text-violet-400 hover:underline">
-            GitHub issue
-          </a>{" "}
-          for questions or feature requests.
-        </p>
       </section>
     </div>
   );

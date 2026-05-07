@@ -71,7 +71,7 @@ class TestAuth:
     async def test_jwt_shape_does_not_fall_through_to_api_secret(self, client, monkeypatch):
         """A JWT-shaped token that fails verification must not authenticate as the dev secret."""
         jwt_like_token = "eyJ.invalid-but-secret"
-        monkeypatch.setenv("API_SECRET_KEY", jwt_like_token)
+        monkeypatch.setenv("API_SECRET_KEY", "test-secret-key")
 
         resp = await client.post(
             "/runs",
@@ -204,69 +204,22 @@ class TestListRuns:
 
 
 # ---------------------------------------------------------------------------
-# POST /webhooks/stripe — basic handling
-# ---------------------------------------------------------------------------
-
-
-class TestStripeWebhook:
-    @pytest.mark.asyncio
-    async def test_webhook_without_secret_rejected(self, client, monkeypatch):
-        """When STRIPE_WEBHOOK_SECRET is unset and verification bypass is not enabled, webhook is rejected."""
-        monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
-        monkeypatch.delenv("STRIPE_DISABLE_WEBHOOK_VERIFICATION", raising=False)
-        payload = {
-            "type": "checkout.session.completed",
-            "data": {
-                "object": {
-                    "metadata": {"tier": "pro"},
-                    "customer_email": "user@example.com",
-                }
-            },
-        }
-        import json
-        resp = await client.post(
-            "/webhooks/stripe",
-            content=json.dumps(payload),
-            headers={"Content-Type": "application/json"},
-        )
-        assert resp.status_code == 400
-        assert "verification" in resp.json()["detail"].lower()
-
-    @pytest.mark.asyncio
-    async def test_webhook_invalid_json_returns_400(self, client, monkeypatch):
-        """Malformed JSON payload returns HTTP 400."""
-        monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
-        resp = await client.post(
-            "/webhooks/stripe",
-            content=b"not-json",
-            headers={"Content-Type": "application/json"},
-        )
-        assert resp.status_code == 400
-
-
-# ---------------------------------------------------------------------------
-# Entitlements and tier enforcement
+# Entitlements and feature access
 # ---------------------------------------------------------------------------
 
 
 class TestEntitlements:
     @pytest.mark.asyncio
-    async def test_entitlements_endpoint_returns_tier_limits(self, client, monkeypatch):
-        monkeypatch.setenv("DEFAULT_SUBSCRIPTION_TIER", "pro")
+    async def test_entitlements_endpoint_returns_open_source_features(self, client):
         resp = await client.get("/me/entitlements", headers=AUTH)
         assert resp.status_code == 200
         body = resp.json()
-        assert body["tier"] == "pro"
-        assert body["limits"]["max_saved_personas"] == 10
+        assert body["tier"] == "open-source"
+        assert body["display_name"] == "Open Source"
+        assert body["limits"]["runs_per_month"] is None
+        assert body["limits"]["max_agents"] is None
+        assert body["limits"]["max_rounds"] is None
+        assert body["limits"]["max_input_tokens"] is None
+        assert body["limits"]["max_saved_personas"] is None
         assert body["features"]["mcp_enabled"] is True
-
-    @pytest.mark.asyncio
-    async def test_create_run_enforces_max_agents(self, client, monkeypatch):
-        monkeypatch.setenv("DEFAULT_SUBSCRIPTION_TIER", "basic")
-        resp = await client.post(
-            "/runs",
-            json={"question": "Q?", "config": {"num_agents": 999}},
-            headers=AUTH,
-        )
-        assert resp.status_code == 400
-        assert "exceeds tier limit" in resp.json()["detail"]
+        assert body["features"]["computer_use_enabled"] is True

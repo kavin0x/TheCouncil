@@ -50,7 +50,7 @@ async def _execute_run_async(task: Task, run_id: str) -> dict[str, Any]:
     from council.models.state import RunStatus, run_store
     from council.core.runner import CouncilRunBlockedError, run_council_for_api
     from council.features.sandbox import SandboxDisabledError, run_sandbox_task
-    from council.models.subscriptions import get_tier, TierName
+
     from council.realtime import emit_run_event
 
     start = time.monotonic()
@@ -67,13 +67,6 @@ async def _execute_run_async(task: Task, run_id: str) -> dict[str, Any]:
         run_kind = str((run.config or {}).get("run_kind") or "council").strip().lower()
 
         if run_kind == "sandbox":
-            tier_raw = (run.config or {}).get("tier", TierName.BASIC.value)
-            try:
-                tier = TierName(tier_raw)
-            except ValueError:
-                tier = TierName.BASIC
-            if not get_tier(tier).limits.computer_use_enabled:
-                raise SandboxDisabledError("Computer-use sandbox requires Ultra or Enterprise.")
             result = await run_sandbox_task(question=run.question, config=run.config)
         else:
             result = await run_council_for_api(

@@ -139,7 +139,8 @@ class TestArtifactEndpoint:
 
 class TestZoomWebhook:
     @pytest.mark.asyncio
-    async def test_url_validation_challenge_no_secret(self, client):
+    async def test_url_validation_challenge_no_secret(self, client, monkeypatch):
+        monkeypatch.delenv("ZOOM_WEBHOOK_SECRET_TOKEN", raising=False)
         payload = {
             "event": "endpoint.url_validation",
             "payload": {"plainToken": "abc123"},
@@ -151,14 +152,16 @@ class TestZoomWebhook:
         assert "encryptedToken" in data
 
     @pytest.mark.asyncio
-    async def test_unknown_event_accepted(self, client):
+    async def test_unknown_event_accepted(self, client, monkeypatch):
+        monkeypatch.delenv("ZOOM_WEBHOOK_SECRET_TOKEN", raising=False)
         payload = {"event": "meeting.created", "payload": {}}
         resp = await client.post("/webhooks/zoom", json=payload)
         assert resp.status_code == 200
         assert resp.json() == {"received": True}
 
     @pytest.mark.asyncio
-    async def test_invalid_json_returns_400(self, client):
+    async def test_invalid_json_returns_400(self, client, monkeypatch):
+        monkeypatch.delenv("ZOOM_WEBHOOK_SECRET_TOKEN", raising=False)
         resp = await client.post(
             "/webhooks/zoom",
             content=b"not-json",
@@ -167,7 +170,8 @@ class TestZoomWebhook:
         assert resp.status_code == 400
 
     @pytest.mark.asyncio
-    async def test_invalid_utf8_returns_400(self, client):
+    async def test_invalid_utf8_returns_400(self, client, monkeypatch):
+        monkeypatch.delenv("ZOOM_WEBHOOK_SECRET_TOKEN", raising=False)
         resp = await client.post(
             "/webhooks/zoom",
             content=b"\xff\xfe invalid bytes",
@@ -239,62 +243,27 @@ class TestBuildArtifact:
 
 
 # ---------------------------------------------------------------------------
-# Web Search & Computer Use tier enforcement tests
+# Feature access tests
 # ---------------------------------------------------------------------------
 
 
-class TestTierGatedFeatures:
+class TestFeatureAccess:
     @pytest.mark.asyncio
-    async def test_web_search_on_basic_tier_returns_403(self, monkeypatch):
-        """Basic tier cannot enable web search; server must reject with 403."""
-        monkeypatch.setenv("DEFAULT_SUBSCRIPTION_TIER", "basic")
-        import importlib
-        import sys
-        if "council.api.app" in sys.modules:
-            importlib.reload(sys.modules["council.api.app"])
-        from council.api.app import app as api_app
+    async def test_entitlements_report_open_source_features(self):
         async with AsyncClient(
-            transport=ASGITransport(app=api_app), base_url="http://testserver"
+            transport=ASGITransport(app=app), base_url="http://testserver"
         ) as c:
-            resp = await c.post(
-                "/runs",
-                json={"question": "Q?", "web_search_enabled": True},
-                headers=AUTH,
-            )
-        assert resp.status_code == 403
-        assert "pro" in resp.json()["detail"].lower()
+            resp = await c.get("/me/entitlements", headers=AUTH)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["tier"] == "open-source"
+        assert body["features"]["web_search_enabled"] is True
+        assert body["features"]["computer_use_enabled"] is True
 
     @pytest.mark.asyncio
-    async def test_computer_use_on_pro_tier_returns_403(self, monkeypatch):
-        """Pro tier cannot enable computer use; server must reject with 403."""
-        monkeypatch.setenv("DEFAULT_SUBSCRIPTION_TIER", "pro")
-        import importlib
-        import sys
-        if "council.api.app" in sys.modules:
-            importlib.reload(sys.modules["council.api.app"])
-        from council.api.app import app as api_app
+    async def test_web_search_enabled_run_is_accepted(self):
         async with AsyncClient(
-            transport=ASGITransport(app=api_app), base_url="http://testserver"
-        ) as c:
-            resp = await c.post(
-                "/runs",
-                json={"question": "Q?", "computer_use_enabled": True},
-                headers=AUTH,
-            )
-        assert resp.status_code == 403
-        assert "ultra" in resp.json()["detail"].lower()
-
-    @pytest.mark.asyncio
-    async def test_web_search_on_pro_tier_succeeds(self, monkeypatch):
-        """Pro tier can enable web search — the run should be created (202)."""
-        monkeypatch.setenv("DEFAULT_SUBSCRIPTION_TIER", "pro")
-        import importlib
-        import sys
-        if "council.api.app" in sys.modules:
-            importlib.reload(sys.modules["council.api.app"])
-        from council.api.app import app as api_app
-        async with AsyncClient(
-            transport=ASGITransport(app=api_app), base_url="http://testserver"
+            transport=ASGITransport(app=app), base_url="http://testserver"
         ) as c:
             resp = await c.post(
                 "/runs",
@@ -302,41 +271,28 @@ class TestTierGatedFeatures:
                 headers=AUTH,
             )
         assert resp.status_code == 202
-        data = resp.json()
-        assert data["status"] == "pending"
+        assert resp.json()["status"] == "pending"
 
     @pytest.mark.asyncio
-    async def test_entitlements_includes_web_search_flag(self, monkeypatch):
-        """Entitlements response must include web_search_enabled for the current tier."""
-        monkeypatch.setenv("DEFAULT_SUBSCRIPTION_TIER", "pro")
-        import importlib
-        import sys
-        if "council.api.app" in sys.modules:
-            importlib.reload(sys.modules["council.api.app"])
-        from council.api.app import app as api_app
+    async def test_computer_use_enabled_run_is_accepted(self):
         async with AsyncClient(
-            transport=ASGITransport(app=api_app), base_url="http://testserver"
+            transport=ASGITransport(app=app), base_url="http://testserver"
         ) as c:
-            resp = await c.get("/me/entitlements", headers=AUTH)
-        assert resp.status_code == 200
-        features = resp.json()["features"]
-        assert "web_search_enabled" in features
-        assert features["web_search_enabled"] is True  # Pro has web search
+            resp = await c.post(
+                "/runs",
+                json={"question": "Computer-use run?", "computer_use_enabled": True},
+                headers=AUTH,
+            )
+        assert resp.status_code == 202
+        assert resp.json()["status"] == "pending"
 
     @pytest.mark.asyncio
-    async def test_sandbox_stream_requires_ultra(self, monkeypatch):
-        """Basic tier trying to access sandbox stream must get 403."""
-        monkeypatch.setenv("DEFAULT_SUBSCRIPTION_TIER", "basic")
-        import importlib
-        import sys
-        if "council.api.app" in sys.modules:
-            importlib.reload(sys.modules["council.api.app"])
-        from council.api.app import app as api_app
+    async def test_sandbox_stream_requires_enabled_flag(self):
         async with AsyncClient(
-            transport=ASGITransport(app=api_app), base_url="http://testserver"
+            transport=ASGITransport(app=app), base_url="http://testserver"
         ) as c:
             resp = await c.get("/runs/fake-run-id/sandbox/stream", headers=AUTH)
-        assert resp.status_code == 403
+        assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------

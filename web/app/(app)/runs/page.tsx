@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, Download, Monitor, Play, Plus, Search } from "lucide-react";
+import { Bot, Download, Monitor, Plus, Search } from "lucide-react";
 import { api, type Entitlements, type Run } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import {
@@ -130,7 +130,7 @@ function CreateRunDialog({ entitlements }: { entitlements?: Entitlements }) {
     },
     onError: (err: Error & { status?: number }) => {
       if (err.status === 429) {
-        setError("Monthly run limit reached. Upgrade your plan to continue.");
+        setError("Monthly run limit reached for this deployment.");
       } else if (err.status === 403) {
         setError("You don't have permission to perform this action.");
       } else if (err.status === 404) {
@@ -267,7 +267,7 @@ function CreateRunDialog({ entitlements }: { entitlements?: Entitlements }) {
                       onChange={setWebSearchEnabled}
                     />
                   ) : (
-                    <Tooltip content="Pro+ feature — upgrade to enable web search">
+                    <Tooltip content="Enable web search in deployment settings to use this toggle">
                       <span>
                         <ToggleSwitch
                           id="web-search-toggle"
@@ -295,7 +295,7 @@ function CreateRunDialog({ entitlements }: { entitlements?: Entitlements }) {
                       onChange={setComputerUseEnabled}
                     />
                   ) : (
-                    <Tooltip content="Ultra+ feature — upgrade to enable computer use">
+                    <Tooltip content="Enable computer-use in deployment settings to use this toggle">
                       <span>
                         <ToggleSwitch
                           id="computer-use-toggle"

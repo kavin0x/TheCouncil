@@ -28,6 +28,7 @@ const navItems = [
 function tierBadgeVariant(tier: string) {
   return (
     {
+      "open-source": "secondary",
       trial:      "warning",
       basic:      "secondary",
       pro:        "default",

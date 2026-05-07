@@ -10,6 +10,3 @@ test.describe("App", () => {
     expect(url).toMatch(/\/dashboard|\/login|\/auth/);
   });
 });
-
-  });
-});

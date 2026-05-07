@@ -1492,7 +1492,7 @@ export default function PersonasPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["personas"] }),
     onError: (e: Error & { status?: number }) => {
       setSaveError(
-        e.status === 429 ? "Persona limit reached. Upgrade your plan." : e.message
+        e.status === 429 ? "Persona limit reached for this deployment." : e.message
       );
     },
   });
@@ -1534,7 +1534,7 @@ export default function PersonasPage() {
     onError: (e: Error & { status?: number }) => {
       setSaveError(
         e.status === 429
-          ? "Persona limit reached. Upgrade your plan."
+          ? "Persona limit reached for this deployment."
           : `Questionnaire generation failed: ${e.message}`
       );
       setViewMode("list");
@@ -1608,9 +1608,9 @@ export default function PersonasPage() {
 
       {atLimit && (
         <div className="rounded-lg border border-amber-800/40 bg-amber-900/10 px-4 py-3 text-sm text-amber-300">
-          You&apos;ve reached your plan&apos;s persona limit ({maxPersonas}).{" "}
+            You&apos;ve reached the persona limit for this deployment ({maxPersonas}).{" "}
           <Link href="/usage" className="underline">
-            Upgrade
+              Review access
           </Link>{" "}
           to save more.
         </div>

@@ -409,10 +409,6 @@ export default function RunDetailPage({
     };
   }, [id, live, applyWsEvent, queryClient]);
 
-  useEffect(() => {
-    if (status === "completed") setFeeds({});
-  }, [status]);
-
   const displayFeeds = useMemo(() => {
     if (run.data?.status === "completed" && run.data.result) {
       return feedsFromResult(run.data.result as Record<string, unknown>);

@@ -46,7 +46,6 @@ function CodeBlock({ code, lang = "json" }: { code: string; lang?: string }) {
   );
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 const MCP_BASE =
   typeof window !== "undefined"
     ? window.location.origin
@@ -89,12 +88,12 @@ export default function IntegrationsPage() {
         <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-xl bg-zinc-800 ring-1 ring-zinc-700/60">
           <Lock className="h-6 w-6 text-zinc-500" />
         </div>
-        <h1 className="mb-2 text-xl font-bold text-white">Integrations require Pro</h1>
+        <h1 className="mb-2 text-xl font-bold text-white">Integrations unavailable</h1>
         <p className="mb-6 max-w-sm text-sm text-zinc-400">
-          MCP server access and IDE plugin integrations are available on Pro, Ultra, and Enterprise plans.
+          MCP server access and IDE plugin integrations are disabled for this deployment.
         </p>
         <Link href="/usage">
-          <Button>Upgrade to Pro</Button>
+          <Button>View feature access</Button>
         </Link>
       </div>
     );
@@ -252,14 +251,14 @@ ${JSON.stringify(
             <CardTitle className="flex items-center gap-2">
               Custom MCP registration
               <span className="inline-flex items-center gap-1 rounded-md bg-zinc-800 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500 ring-1 ring-zinc-700/50">
-                <Lock className="h-2.5 w-2.5" /> Pro+
+                <Lock className="h-2.5 w-2.5" /> Disabled
               </span>
             </CardTitle>
-            <CardDescription>Available on Pro and above.</CardDescription>
+            <CardDescription>Enable custom MCP registration in deployment settings.</CardDescription>
           </CardHeader>
           <CardContent>
             <Link href="/usage">
-              <Button variant="outline" size="sm">Upgrade to Pro</Button>
+              <Button variant="outline" size="sm">View feature access</Button>
             </Link>
           </CardContent>
         </Card>

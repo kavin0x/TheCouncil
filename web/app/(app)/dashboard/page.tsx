@@ -38,6 +38,7 @@ function useDashboard(getToken: () => Promise<string | null>) {
 function tierBadgeVariant(tier: string) {
   return (
     {
+      "open-source": "secondary",
       trial: "warning",
       basic: "secondary",
       pro: "default",
@@ -89,7 +90,7 @@ export default function DashboardPage() {
         {/* Tier card */}
         <Card>
           <CardHeader>
-            <CardTitle>Current plan</CardTitle>
+            <CardTitle>Current access</CardTitle>
           </CardHeader>
           <CardContent>
             {ent.isLoading ? (
@@ -100,7 +101,7 @@ export default function DashboardPage() {
                   {ent.data?.display_name}
                 </Badge>
                 <Link href="/usage" className="text-xs text-violet-400 hover:underline">
-                  Manage
+                  View details
                 </Link>
               </div>
             )}
@@ -128,9 +129,9 @@ export default function DashboardPage() {
                 <Progress value={pct} />
                 {pct >= 90 && (
                   <p className="text-xs text-amber-400">
-                    Approaching limit.{" "}
+                    Approaching your current limit. {" "}
                     <Link href="/usage" className="underline">
-                      Upgrade your plan
+                      Review access details
                     </Link>
                     .
                   </p>

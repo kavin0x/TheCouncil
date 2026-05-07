@@ -1,15 +1,15 @@
 const BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
-export type TierName = "trial" | "basic" | "pro" | "ultra" | "enterprise";
+export type EntitlementTier = "open-source" | "trial" | "basic" | "pro" | "ultra" | "enterprise";
 
 export interface Entitlements {
-  tier: TierName;
+  tier: EntitlementTier;
   display_name: string;
   limits: {
-    runs_per_month: number;
-    max_agents: number;
-    max_rounds: number;
-    max_input_tokens: number;
+    runs_per_month: number | null;
+    max_agents: number | null;
+    max_rounds: number | null;
+    max_input_tokens: number | null;
     max_saved_personas: number | null;
   };
   features: {
@@ -102,17 +102,7 @@ export interface CouncilConfig {
 
 export interface Usage {
   period: string;
-  runs: { used: number; limit: number };
-}
-
-export interface Billing {
-  tier: TierName;
-  display_name: string;
-  price_usd_monthly: number;
-  status: string;
-  trial_end: number | null;
-  next_renewal: number | null;
-  stripe_customer_id: string | null;
+  runs: { used: number; limit?: number | null };
 }
 
 export interface ApiKey {
@@ -214,24 +204,6 @@ export const api = {
 
   getUsage: (getToken: () => Promise<string | null>) =>
     request<Usage>("/me/usage", getToken),
-
-  getBilling: (getToken: () => Promise<string | null>) =>
-    request<Billing>("/me/billing", getToken),
-
-  createCheckout: (
-    getToken: () => Promise<string | null>,
-    body: { tier: string; success_url: string; cancel_url: string }
-  ) =>
-    request<{ url: string }>("/me/billing/checkout", getToken, {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-
-  createPortal: (getToken: () => Promise<string | null>, return_url: string) =>
-    request<{ url: string }>("/me/billing/portal", getToken, {
-      method: "POST",
-      body: JSON.stringify({ return_url }),
-    }),
 
   listRuns: (getToken: () => Promise<string | null>) =>
     request<Run[]>("/runs", getToken),

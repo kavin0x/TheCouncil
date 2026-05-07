@@ -162,16 +162,17 @@ export default function SettingsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Subscription</CardTitle>
-          <CardDescription>Your current plan and key entitlements.</CardDescription>
+          <CardTitle>Feature access</CardTitle>
+          <CardDescription>Your current deployment capabilities and limits.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex items-center gap-2">
-            <span className="text-sm text-zinc-400">Plan:</span>
+            <span className="text-sm text-zinc-400">Access profile:</span>
             <Badge
               variant={
                 (
                   {
+                    "open-source": "secondary" as const,
                     trial: "warning" as const,
                     basic: "secondary" as const,
                     pro: "default" as const,
@@ -186,9 +187,9 @@ export default function SettingsPage() {
           </div>
           <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
             {[
-              ["Runs / month", ent.data?.limits.runs_per_month],
-              ["Max agents", ent.data?.limits.max_agents],
-              ["Max rounds", ent.data?.limits.max_rounds],
+              ["Runs / month", ent.data?.limits.runs_per_month ?? "Unlimited"],
+              ["Max agents", ent.data?.limits.max_agents ?? "Unlimited"],
+              ["Max rounds", ent.data?.limits.max_rounds ?? "Unlimited"],
               ["Saved personas", ent.data?.limits.max_saved_personas ?? "Unlimited"],
             ].map(([label, val]) => (
               <div key={String(label)}>

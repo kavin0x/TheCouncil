@@ -472,7 +472,7 @@ class CreateRunConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    num_agents: int | None = Field(None, ge=0, description="Agent count; tier limits enforced separately.")
+    num_agents: int | None = Field(None, ge=0, description="Agent count for the run.")
     num_rounds: int | None = Field(None, ge=0, le=12)
     rounds: int | None = Field(None, ge=0, le=12, description="Alias for num_rounds.")
     mode: str | None = Field(None, max_length=32, description="Personality mode: canned, dynamic, hybrid, or generated.")
@@ -696,9 +696,9 @@ async def get_sandbox_stream(
 async def get_entitlements(
     auth: Annotated[AuthContext, Depends(require_auth)],
 ) -> dict[str, Any]:
-    """Return the available features for self-hosted instance.
-    
-    All features are available in self-hosted deployments.
+    """Return the available features for a self-hosted instance.
+
+    This payload is the client-facing capability contract for the deployment.
     """
     return {
         "tier": "open-source",

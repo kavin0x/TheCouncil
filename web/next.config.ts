@@ -1,5 +1,4 @@
 import type { NextConfig } from "next";
-import path from "path";
 import frameworkConfig from "./config/framework/next.config";
 
 const nextConfig: NextConfig = {

@@ -57,7 +57,7 @@ docker-compose up -d   # postgres, redis, api, worker, nginx
 
 ### Service Layout
 
-```
+```text
 Next.js (port 3000)
     ↓  HTTP + Bearer token
 FastAPI (port 8000)
@@ -70,6 +70,7 @@ Celery Worker (separate process or in-process fallback)
 ### Debate Engine (`council/core/`)
 
 Runs are executed in 5 structured phases:
+
 1. **Independent Takes** — agents respond in parallel, no cross-knowledge
 2. **Cross-Debate I** — sequential rebuttals
 3. **Private Deliberation** — direct messages between agents
@@ -83,6 +84,7 @@ Long-running runs are enqueued via Celery (`council/worker/`). Set `COUNCIL_DISA
 ### Personality Modes (`council/features/personalities.py`)
 
 Four modes configure how agent personas are created:
+
 - **CANNED** — hardcoded personas (Security Architect, Red Teamer, etc.)
 - **DYNAMIC** — LLM-generated at runtime from the debate topic
 - **HYBRID** — mix of canned + dynamic
@@ -102,9 +104,9 @@ The `users` table has `tos_accepted_at` (Float, nullable) and `tos_version` (Str
 
 The `api_keys` table stores user-generated programmatic API keys. The `ApiKey` ORM model (`council/db/models.py`) has fields: `id`, `owner_id` (Clerk user ID), `name`, `key_hash` (sha256 — plaintext is never stored), `key_prefix` (display only), `created_at`, `last_used_at`, `is_active`.
 
-### Subscription Tiers
+### Feature Access
 
-Features are gated by tier (Trial → Basic → Pro → Ultra → Enterprise). Tier logic lives in `council/models/`. Stripe webhooks at `POST /webhooks/stripe` manage subscription lifecycle.
+The app exposes an open-source entitlement payload at `GET /me/entitlements` that describes available features and soft limits. The current backend does not implement Stripe, subscription persistence, or billing checkout flows.
 
 ### Rate-Limit Headers
 
