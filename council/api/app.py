@@ -151,13 +151,6 @@ if "*" in _cors_origins:
         "CORS_ORIGINS='*' cannot be combined with allow_credentials=True. "
         "Set CORS_ORIGINS to one or more explicit allowed origins."
     )
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_cors_origins,
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
-)
 
 
 @app.middleware("http")
@@ -175,6 +168,18 @@ async def add_security_headers(request: Request, call_next):  # type: ignore[typ
 async def add_rate_limit_headers(request: Request, call_next):  # type: ignore[type-arg]
     """Pass-through middleware. Rate limiting is handled at the application level."""
     return await call_next(request)
+
+
+# Add CORS middleware last so it executes first in the middleware stack (outermost)
+# and properly handles OPTIONS preflight requests before other middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
+    allow_private_network=True,
+)
 
 app.mount("/mcp", _mcp_app)
 

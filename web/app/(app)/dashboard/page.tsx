@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, Bot, Play, Zap } from "lucide-react";
-import { api, type Entitlements, type Run, type Usage } from "@/lib/api";
+import { api, type Entitlements, type Run } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import {
   Badge,
@@ -12,7 +12,6 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-  Progress,
   QueryError,
   Skeleton,
 } from "@/components/ui";
@@ -23,16 +22,12 @@ function useDashboard(getToken: () => Promise<string | null>) {
     queryKey: ["entitlements"],
     queryFn: () => api.getEntitlements(getToken),
   });
-  const usage = useQuery<Usage>({
-    queryKey: ["usage"],
-    queryFn: () => api.getUsage(getToken),
-  });
   const runs = useQuery<Run[]>({
     queryKey: ["runs"],
     queryFn: () => api.listRuns(getToken),
     select: (data) => data.slice(0, 5),
   });
-  return { ent, usage, runs };
+  return { ent, runs };
 }
 
 function tierBadgeVariant(tier: string) {
@@ -50,21 +45,15 @@ function tierBadgeVariant(tier: string) {
 
 export default function DashboardPage() {
   const { getToken } = useAuth();
-  const { ent, usage, runs } = useDashboard(getToken);
+  const { ent, runs } = useDashboard(getToken);
 
-  const runsUsed = usage.data?.runs.used ?? 0;
-  const runsLimit = usage.data?.runs.limit ?? 1;
-  const pct = Math.min(100, Math.round((runsUsed / runsLimit) * 100));
-
-  const loadError = ent.error || usage.error || runs.error;
+  const loadError = ent.error || runs.error;
   const refetchAll = () => {
     void ent.refetch();
-    void usage.refetch();
     void runs.refetch();
   };
   const isRefetching =
     (ent.isFetching && !ent.isLoading) ||
-    (usage.isFetching && !usage.isLoading) ||
     (runs.isFetching && !runs.isLoading);
 
   return (
@@ -83,63 +72,6 @@ export default function DashboardPage() {
             <Play className="h-3.5 w-3.5" /> New run
           </Button>
         </Link>
-      </div>
-
-      {/* Stats row */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        {/* Tier card */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Current access</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {ent.isLoading ? (
-              <Skeleton className="h-7 w-24" />
-            ) : (
-              <div className="flex items-center gap-2">
-                <Badge variant={tierBadgeVariant(ent.data?.tier ?? "")}>
-                  {ent.data?.display_name}
-                </Badge>
-                <Link href="/usage" className="text-xs text-violet-400 hover:underline">
-                  View details
-                </Link>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Usage card */}
-        <Card className="sm:col-span-2">
-          <CardHeader>
-            <CardTitle>Monthly runs</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {usage.isLoading ? (
-              <Skeleton className="h-8 w-full" />
-            ) : (
-              <>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-zinc-400">
-                    {runsUsed} of {runsLimit} used
-                  </span>
-                  <span className={pct >= 90 ? "text-red-400" : "text-zinc-500"}>
-                    {pct}%
-                  </span>
-                </div>
-                <Progress value={pct} />
-                {pct >= 90 && (
-                  <p className="text-xs text-amber-400">
-                    Approaching your current limit. {" "}
-                    <Link href="/usage" className="underline">
-                      Review access details
-                    </Link>
-                    .
-                  </p>
-                )}
-              </>
-            )}
-          </CardContent>
-        </Card>
       </div>
 
       {/* Feature flags */}

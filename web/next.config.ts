@@ -7,6 +7,7 @@ const nextConfig: NextConfig = {
     root: __dirname,
   },
   allowedDevOrigins: ["127.0.2.2"],
+  devIndicators: false
 };
 
 export default nextConfig;

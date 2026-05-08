@@ -43,8 +43,9 @@ class StructuredFormatter(logging.Formatter):
         }
 
         # Add extra fields if present
-        if hasattr(record, "extra_fields"):
-            log_data.update(record.extra_fields)
+        extra_fields = getattr(record, "extra_fields", None)
+        if isinstance(extra_fields, dict):
+            log_data.update(extra_fields)
 
         if record.exc_info:
             log_data["exception"] = self.formatException(record.exc_info)

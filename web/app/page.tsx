@@ -16,7 +16,7 @@ const capabilities = [
   {
     icon: Shield,
     label: "Configurable personas",
-    desc: "Compose councils from MBTI-derived or hand-crafted personas. Save them, version them, reuse across every run.",
+    desc: "Build councils from personas you generate or import. Pull from LinkedIn, YouTube, wherever. Fill out the questionnaire if you want to start from scratch. Save them, version them, reuse them however you want.",
   },
   {
     icon: Terminal,
@@ -27,10 +27,10 @@ const capabilities = [
 
 const DEMO_LINES = [
   { role: "sys",     text: "council.run  q='Should we adopt a monorepo?'  agents=5  rounds=3" },
-  { role: "agent",   text: "[INTJ] Risk: coupling between teams increases blast radius of CI failures." },
-  { role: "agent",   text: "[ENTP] Counter: shared tooling amortises cross-repo refactors. Data from Google/Meta support this." },
-  { role: "agent",   text: "[INFJ] Second-order: culture drift accelerates when ownership boundaries blur." },
-  { role: "agent",   text: "[ENTJ] Synthesis: adopt monorepo with explicit ownership CODEOWNERS + per-pkg CI isolation." },
+  { role: "agent",   text: "Risk: coupling between teams increases blast radius of CI failures." },
+  { role: "agent",   text: "Counter: shared tooling amortises cross-repo refactors. Data from Google/Meta support this." },
+  { role: "agent",   text: "Second-order: culture drift accelerates when ownership boundaries blur." },
+  { role: "agent",   text: "Synthesis: adopt monorepo with explicit ownership CODEOWNERS + per-pkg CI isolation." },
   { role: "result",  text: "✓  Consensus reached in round 2 of 3  ·  4.2 s" },
 ];
 
