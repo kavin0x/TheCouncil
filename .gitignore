@@ -6,6 +6,7 @@ venv/
 
 # Python
 __pycache__/
+*.pyc
 *.py[cod]
 *.egg-info/
 .pytest_cache/
