@@ -8,17 +8,16 @@ Open a **private security advisory** at:
 https://github.com/kavin0x/TheCouncil/security/advisories/new
 
 Include:
+
 - Description of the vulnerability
 - Steps to reproduce
 - Potential impact
 - Any suggested mitigations
 
-You will receive an acknowledgment within 48 hours and a status update within 7 days.
-
-## Supported Versions
+Supported Versions
 
 | Version | Supported |
-|---------|-----------|
+| ------- | --------- |
 | main    | Yes       |
 
 ## Known Issues
