@@ -3,12 +3,16 @@
 import { useState, useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ArrowRight,
   Bot,
   ChevronLeft,
   ChevronRight,
   ClipboardList,
+  Monitor,
   Pencil,
+  Play,
   Plus,
+  Search,
   Settings2,
   Shield,
   Sparkles,
@@ -17,6 +21,7 @@ import {
   ToggleRight,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   api,
   type CouncilConfig,
@@ -38,6 +43,7 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
   Input,
   Label,
   Select,
@@ -47,6 +53,8 @@ import {
   SelectValue,
   Skeleton,
   Textarea,
+  Tooltip,
+  TooltipProvider,
 } from "@/components/ui";
 import { formatRelative } from "@/lib/utils";
 
@@ -1254,8 +1262,15 @@ function CouncilConfigPanel() {
 
         {personas.data && personas.data.length > 0 && (
           <div className="space-y-2">
-            <Label className="block">Select personas for council runs</Label>
-            <p className="text-xs text-zinc-500 mb-2">
+            <div className="flex items-center justify-between">
+              <Label className="block">Select personas for council runs</Label>
+              {selectedIds.length > 0 && (
+                <Link href="/runs" className="flex items-center gap-1 text-xs text-violet-400 hover:text-violet-300 transition-colors">
+                  View runs <ArrowRight className="h-3 w-3" />
+                </Link>
+              )}
+            </div>
+            <p className="text-xs text-zinc-500">
               Choose which personas participate as agents in your council debates.
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-60 overflow-y-auto">
@@ -1285,6 +1300,11 @@ function CouncilConfigPanel() {
                   </button>
                 ))}
             </div>
+            {selectedIds.length === 0 && personas.data.filter((p) => p.is_active).length > 0 && (
+              <p className="text-xs text-amber-600/80 pt-1">
+                No personas selected — runs will use the default council.
+              </p>
+            )}
           </div>
         )}
       </CardContent>
@@ -1431,6 +1451,240 @@ function EditPersonaForm({
   );
 }
 
+// ---- Toggle Switch ----
+
+function ToggleSwitch({
+  id,
+  checked,
+  onChange,
+  disabled,
+}: {
+  id: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      id={id}
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => !disabled && onChange(!checked)}
+      className={[
+        "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent",
+        "transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2",
+        "focus-visible:ring-violet-500 focus-visible:ring-offset-1 focus-visible:ring-offset-zinc-950",
+        disabled ? "cursor-not-allowed opacity-40" : "",
+        checked ? "bg-violet-600" : "bg-zinc-700",
+      ].join(" ")}
+    >
+      <span
+        className={[
+          "pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-sm",
+          "transform transition-transform duration-200",
+          checked ? "translate-x-4" : "translate-x-0",
+        ].join(" ")}
+      />
+    </button>
+  );
+}
+
+// ---- Start Run Dialog ----
+
+function StartRunDialog({ entitlements }: { entitlements?: Entitlements }) {
+  const { getToken } = useAuth();
+  const qc = useQueryClient();
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [question, setQuestion] = useState("");
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [computerUseEnabled, setComputerUseEnabled] = useState(false);
+  const [sandboxStreamUrl, setSandboxStreamUrl] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  const councilConfig = useQuery<CouncilConfig>({
+    queryKey: ["council-config"],
+    queryFn: () => api.getCouncilConfig(getToken),
+    enabled: open,
+  });
+
+  const canWebSearch = entitlements?.features.web_search_enabled ?? false;
+  const canComputerUse = entitlements?.features.computer_use_enabled ?? false;
+  const selectedIds = councilConfig.data?.selected_persona_ids ?? [];
+
+  const create = useMutation({
+    mutationFn: () =>
+      api.createRun(getToken, {
+        question,
+        config: {
+          num_agents: councilConfig.data?.num_agents ?? 3,
+          num_rounds: councilConfig.data?.num_rounds ?? 3,
+          ...(selectedIds.length > 0 && { selected_persona_ids: selectedIds }),
+        },
+        web_search_enabled: webSearchEnabled,
+        computer_use_enabled: computerUseEnabled,
+      }),
+    onSuccess: async (run) => {
+      qc.invalidateQueries({ queryKey: ["runs"] });
+      qc.invalidateQueries({ queryKey: ["usage"] });
+
+      if (computerUseEnabled) {
+        try {
+          const { stream_url } = await api.getSandboxStream(getToken, run.run_id);
+          setSandboxStreamUrl(stream_url);
+        } catch (err) {
+          console.warn("Sandbox stream URL unavailable");
+          if (process.env.NODE_ENV === "development") console.error(err);
+          setError("Run started, but the sandbox stream could not be fetched yet.");
+        }
+      } else {
+        setOpen(false);
+        router.push("/runs");
+      }
+    },
+    onError: (err: Error & { status?: number }) => {
+      if (err.status === 429) {
+        setError("Monthly run limit reached for this deployment.");
+      } else if (err.status === 403) {
+        setError("You don't have permission to perform this action.");
+      } else if (err.status === 404) {
+        setError("Resource not found.");
+      } else {
+        setError("An unexpected error occurred. Please try again.");
+      }
+    },
+  });
+
+  function handleOpenChange(v: boolean) {
+    setOpen(v);
+    if (!v) {
+      setQuestion("");
+      setWebSearchEnabled(false);
+      setComputerUseEnabled(false);
+      setSandboxStreamUrl(null);
+      setError("");
+    }
+  }
+
+  return (
+    <TooltipProvider>
+      <Dialog open={open} onOpenChange={handleOpenChange}>
+        <DialogTrigger asChild>
+          <Button size="sm" variant="outline" className="gap-2 border-violet-700 text-violet-300 hover:bg-violet-900/30">
+            <Play className="h-3 w-3" />
+            Start a run
+          </Button>
+        </DialogTrigger>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Start a council run</DialogTitle>
+            <DialogDescription>
+              Pose a question for your configured council to debate.
+            </DialogDescription>
+          </DialogHeader>
+
+          {sandboxStreamUrl ? (
+            <div className="space-y-4">
+              <p className="text-sm text-zinc-300">
+                Run started. The Docker sandbox is live — open the link below to watch the agent work in real time.
+              </p>
+              <a
+                href={sandboxStreamUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block truncate rounded-md border border-zinc-700 bg-zinc-800/60 px-3 py-2 text-xs text-violet-300 hover:underline"
+              >
+                {sandboxStreamUrl}
+              </a>
+              <details className="group">
+                <summary className="cursor-pointer text-xs text-zinc-500 hover:text-zinc-300">
+                  Preview sandbox (iframe)
+                </summary>
+                <iframe
+                  src={sandboxStreamUrl}
+                  className="mt-2 h-64 w-full rounded-md border border-zinc-700"
+                  title="Docker sandbox stream"
+                  sandbox="allow-scripts allow-same-origin allow-forms"
+                />
+              </details>
+              <div className="flex justify-end gap-2">
+                <DialogClose asChild>
+                  <Button onClick={() => router.push("/runs")}>View runs</Button>
+                </DialogClose>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="run-question">Question</Label>
+                <Textarea
+                  id="run-question"
+                  rows={3}
+                  placeholder="What is the most important thing to consider when scaling a distributed system?"
+                  value={question}
+                  onChange={(e) => setQuestion(e.target.value)}
+                  maxLength={4096}
+                />
+                <p className="text-right text-xs text-zinc-600">{question.length}/4096</p>
+              </div>
+
+              <div className="space-y-3 rounded-lg border border-zinc-800 bg-zinc-900/40 px-4 py-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Search className="h-3.5 w-3.5 text-zinc-500" />
+                    <Label htmlFor="run-web-search" className="cursor-pointer">Enable Web Search</Label>
+                  </div>
+                  {canWebSearch ? (
+                    <ToggleSwitch id="run-web-search" checked={webSearchEnabled} onChange={setWebSearchEnabled} />
+                  ) : (
+                    <Tooltip content="Enable web search in deployment settings to use this toggle">
+                      <span>
+                        <ToggleSwitch id="run-web-search" checked={false} onChange={() => {}} disabled />
+                      </span>
+                    </Tooltip>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Monitor className="h-3.5 w-3.5 text-zinc-500" />
+                    <Label htmlFor="run-computer-use" className="cursor-pointer">Enable Computer Use Sandbox</Label>
+                  </div>
+                  {canComputerUse ? (
+                    <ToggleSwitch id="run-computer-use" checked={computerUseEnabled} onChange={setComputerUseEnabled} />
+                  ) : (
+                    <Tooltip content="Enable computer-use in deployment settings to use this toggle">
+                      <span>
+                        <ToggleSwitch id="run-computer-use" checked={false} onChange={() => {}} disabled />
+                      </span>
+                    </Tooltip>
+                  )}
+                </div>
+              </div>
+
+              {error && <p className="text-sm text-red-400">{error}</p>}
+
+              <div className="flex justify-end gap-2 pt-1">
+                <DialogClose asChild>
+                  <Button variant="ghost">Cancel</Button>
+                </DialogClose>
+                <Button
+                  onClick={() => create.mutate()}
+                  disabled={create.isPending || !question.trim()}
+                >
+                  {create.isPending ? "Starting…" : "Start run"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </TooltipProvider>
+  );
+}
+
 // ---- Main page ----
 
 type ViewMode = "list" | "questionnaire";
@@ -1465,6 +1719,7 @@ export default function PersonasPage() {
   const [saveError, setSaveError] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [activeTab, setActiveTab] = useState<"all" | "prebuilt" | "custom">("all");
+  const [newlyCreatedPersona, setNewlyCreatedPersona] = useState<Persona | null>(null);
 
   const personas = useQuery<Persona[]>({
     queryKey: ["personas"],
@@ -1476,6 +1731,27 @@ export default function PersonasPage() {
     queryFn: () => api.getEntitlements(getToken),
     staleTime: Infinity,
   });
+
+  const councilConfig = useQuery<CouncilConfig>({
+    queryKey: ["council-config"],
+    queryFn: () => api.getCouncilConfig(getToken),
+  });
+
+  const addToCouncil = useMutation({
+    mutationFn: (personaId: string) => {
+      const current = councilConfig.data?.selected_persona_ids ?? [];
+      if (current.includes(personaId)) return Promise.resolve(councilConfig.data!);
+      return api.updateCouncilConfig(getToken, {
+        selected_persona_ids: [...current, personaId],
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["council-config"] });
+      setNewlyCreatedPersona(null);
+    },
+  });
+
+  const selectedIds = councilConfig.data?.selected_persona_ids ?? [];
 
   const maxPersonas = ent.data?.limits.max_saved_personas ?? null;
   const customCount =
@@ -1527,9 +1803,10 @@ export default function PersonasPage() {
   const questionnaireGen = useMutation({
     mutationFn: (payload: QuestionnairePayload) =>
       api.createPersonaFromQuestionnaire(getToken, payload),
-    onSuccess: () => {
+    onSuccess: (persona) => {
       qc.invalidateQueries({ queryKey: ["personas"] });
       setViewMode("list");
+      setNewlyCreatedPersona(persona);
     },
     onError: (e: Error & { status?: number }) => {
       setSaveError(
@@ -1570,7 +1847,10 @@ export default function PersonasPage() {
             </p>
           )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          {selectedIds.length > 0 && (
+            <StartRunDialog entitlements={ent.data} />
+          )}
           <Button
             size="sm"
             variant="outline"
@@ -1594,6 +1874,45 @@ export default function PersonasPage() {
         </div>
       </div>
 
+      {/* Post-questionnaire persona created banner */}
+      {newlyCreatedPersona && (
+        <div className="flex items-center justify-between rounded-lg border border-emerald-800/50 bg-emerald-950/30 px-4 py-3">
+          <div>
+            <p className="text-sm font-medium text-emerald-300">
+              &ldquo;{newlyCreatedPersona.name}&rdquo; was created.
+            </p>
+            <p className="text-xs text-emerald-700 mt-0.5">
+              Add them to your council to include in upcoming runs.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {!selectedIds.includes(newlyCreatedPersona.persona_id) ? (
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5 border-emerald-700/50 text-emerald-300 hover:bg-emerald-900/30"
+                onClick={() => addToCouncil.mutate(newlyCreatedPersona.persona_id)}
+                disabled={addToCouncil.isPending}
+              >
+                {addToCouncil.isPending ? "Adding…" : "Add to council"}
+              </Button>
+            ) : (
+              <Link href="/runs">
+                <Button size="sm" className="gap-1.5 bg-emerald-700 hover:bg-emerald-600">
+                  View runs <ArrowRight className="h-3 w-3" />
+                </Button>
+              </Link>
+            )}
+            <button
+              className="text-xs text-emerald-800 hover:text-emerald-600 transition-colors"
+              onClick={() => setNewlyCreatedPersona(null)}
+            >
+              dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
       {saveError && (
         <div className="rounded-lg border border-red-800 bg-red-950/30 px-4 py-3 text-sm text-red-300">
           {saveError}{" "}
@@ -1615,6 +1934,9 @@ export default function PersonasPage() {
           to save more.
         </div>
       )}
+
+      {/* Council Configuration — above persona list so it's not buried */}
+      <CouncilConfigPanel />
 
       {/* Tab bar */}
       <div className="flex gap-1 border-b border-zinc-800 pb-px">
@@ -1744,9 +2066,6 @@ export default function PersonasPage() {
           )}
         </CardContent>
       </Card>
-
-      {/* Council Configuration */}
-      <CouncilConfigPanel />
 
       {/* Edit dialog */}
       <Dialog open={!!editPersona} onOpenChange={(o) => !o && setEditPersona(null)}>
