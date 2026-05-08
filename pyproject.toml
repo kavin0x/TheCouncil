@@ -4,6 +4,15 @@ version = "0.1.0"
 description = "Multi-agent council debates (FastAPI + CLI) with optional Next.js web UI"
 readme = "README.md"
 requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+authors = [
+  { name = "kavin0x" },
+]
+
+[project.urls]
+Homepage = "https://github.com/kavin0x/TheCouncil"
+Repository = "https://github.com/kavin0x/TheCouncil"
+Issues = "https://github.com/kavin0x/TheCouncil/issues"
 
 [project.scripts]
 council = "council.cli.main:main"

@@ -14,7 +14,7 @@ Include:
 - Potential impact
 - Any suggested mitigations
 
-Supported Versions
+## Supported Versions
 
 | Version | Supported |
 | ------- | --------- |
@@ -22,4 +22,4 @@ Supported Versions
 
 ## Known Issues
 
-See [SECURITY_REVIEW.md](SECURITY_REVIEW.md) for a full audit of known issues and their remediation status.
+Known issues and their remediation status are tracked via [GitHub Security Advisories](https://github.com/kavin0x/TheCouncil/security/advisories).

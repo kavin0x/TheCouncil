@@ -331,15 +331,15 @@ class TestBuildAgentPanel:
     def test_default_mode_name_collision_prefers_base_agent(self):
         """When names collide, default merge keeps the base/YAML agent and skips generated duplicate."""
         base_agents = [
-            Agent(name="Kavin Shah", role="Base", system_prompt="A", color="blue"),
+            Agent(name="Alex Rivera", role="Base", system_prompt="A", color="blue"),
         ]
         generated_data = [
-            {"name": "kavin shah", "data": "Generated profile", "active": True},
+            {"name": "alex rivera", "data": "Generated profile", "active": True},
             {"name": "Another Persona", "data": "Generated profile", "active": True},
         ]
 
         merged = _resolve_default_agents(base_agents, generated_data)
-        assert [a.name for a in merged] == ["Kavin Shah", "Another Persona"]
+        assert [a.name for a in merged] == ["Alex Rivera", "Another Persona"]
 
     def test_mode_isolation(self):
         """Different modes return distinct agent sets."""
