@@ -5,13 +5,15 @@ A multi-agent AI deliberation platform that orchestrates structured debates betw
 ## Features
 
 - **Multi-Agent Debates**: Orchestrate 5-phase structured deliberations (Independent Takes → Cross-Debate → Private Messages → Resolution)
-- **Flexible Personas**: Use pre-configured personas, generate dynamically from topics, or import custom agent definitions
-- **Sandbox Execution**: Run code safely in Docker containers (computer-use workflows)
-- **Web Search**: Integrate external knowledge via Tavily API
-- **Real-time Events**: WebSocket streams for live debate progress tracking
-- **MCP Integration**: Control TheCouncil from your IDE (Cursor, Claude Desktop, etc.)
+- **Flexible Personas**: Use pre-configured personas from `agents.yaml`, generate dynamically from the topic, or build custom personas via an LLM-powered questionnaire
+- **Deliberation Artifacts**: Structured output (decision rationale, recommended action, dissenting opinions, top-3 resolutions) available as JSON or Markdown
+- **Sandbox Execution**: Run code in Docker containers or stream a live VNC desktop for computer-use workflows
+- **Web Search**: Integrate external knowledge via Tavily API during deliberation
+- **Real-time Events**: WebSocket streams for live debate progress; falls back to in-process broadcast when Redis is unavailable
+- **MCP Integration**: Control TheCouncil from your IDE (Cursor, Claude Desktop) via the built-in FastMCP server at `/mcp`
+- **Zoom Integration**: Webhook receiver posts artifact summaries to Zoom chat when a meeting ends
 - **REST API**: Full HTTP API for programmatic access
-- **Self-Hosted**: Deploy on your own infrastructure with Docker or bare metal
+- **Self-Hosted**: Deploy on your own infrastructure with Docker or bare metal; no usage limits on the open-source tier
 
 ## Repository Layout
 
@@ -65,7 +67,7 @@ docker-compose up -d
 
 Copy `.env.example` to `.env` and populate these required variables:
 
-- `OPENROUTER_API_KEY` — LLM provider (OpenRouter for variety of models)
+- `OPENROUTER_API_KEY` — LLM provider (OpenRouter; required)
 - `API_SECRET_KEY` — Bearer token for API auth (min 32 chars in production)
 - `DATABASE_URL` — PostgreSQL connection string
 - `REDIS_URL` — Redis connection for pub/sub and job queue
@@ -73,7 +75,20 @@ Copy `.env.example` to `.env` and populate these required variables:
 Optional integrations:
 
 - `TAVILY_API_KEY` — Enable web search in debates
-- `XAI_API_KEY` — Use Grok models (cheaper alternative to OpenRouter)
+- `XAI_API_KEY` — Use native Grok API (cheaper for `grok-*` models)
+- `ZOOM_WEBHOOK_SECRET_TOKEN` / `ZOOM_RUN_SECRET` / `ZOOM_API_TOKEN` — Zoom chat integration
+
+Behavior flags:
+
+- `CORS_ORIGINS` — Comma-separated allowed origins (default: `http://localhost:3000`; no wildcard)
+- `COUNCIL_DISABLE_WORKER=1` — Run Celery in-process (dev/test)
+- `COUNCIL_GUARDRAILS=0` — Disable content guardrails
+- `ALLOW_WEBSOCKET_QUERY_TOKEN=1` — Allow `?token=` fallback on WebSocket (insecure; off by default)
+- `HIDE_DOCS=1` — Disable `/docs`, `/redoc`, `/openapi.json`
+
+Frontend (`web/.env.local`):
+
+- `NEXT_PUBLIC_API_TOKEN` — Same value as `API_SECRET_KEY`; required if the backend enforces auth
 
 ## Testing
 
@@ -102,16 +117,17 @@ npm run typecheck
 2. **Cross-Debate I** — Sequential rebuttals with visibility into prior responses
 3. **Private Deliberation** — Direct point-to-point messages between agents
 4. **Cross-Debate II** — Final sequential round
-5. **Resolution & Vote** — Agents propose resolutions; voting determines winner
+5. **Resolution & Vote** — Agents propose resolutions; voting determines winner; tie-breaker reruns until one resolution wins
 
 **Tech Stack:**
 
 - Backend: FastAPI + SQLAlchemy async + PostgreSQL
-- Frontend: Next.js 16 + React 19 + Tailwind CSS
+- Frontend: Next.js 16 + React 19 + Tailwind CSS 4
 - Message Bus: Redis Streams (pub/sub for real-time events)
 - Job Queue: Celery + Redis (long-running debates)
-- Sandboxing: Docker (code execution for computer-use)
-- LLM Providers: OpenRouter (primary), XAI Grok (optional)
+- Sandboxing: Docker (code execution + VNC desktop for computer-use)
+- LLM Providers: OpenRouter (primary), XAI Grok native API (optional)
+- IDE Integration: FastMCP server mounted at `/mcp`
 
 ## Contributing
 

@@ -96,13 +96,31 @@ Agents also have **Job Roles** (Devil's Advocate, Moderator, Domain Expert, Cont
 
 Events are published per-run to Redis Streams (`council:run:{run_id}:events`) and broadcast over WebSocket (`/ws/{run_id}`). Falls back to in-process broadcasting if Redis is unavailable. WebSocket auth now prefers the `Sec-WebSocket-Protocol` bearer token; query-token fallback is opt-in via `ALLOW_WEBSOCKET_QUERY_TOKEN=1`. Event types: `run_started`, `agent_response`, `agent_delta`, `agent_dm`, `resolution_vote`, `run_completed`, `run_failed`.
 
-### Database (`council/db/`)
+### API Endpoints
 
-SQLAlchemy 2.0 async with asyncpg. Key tables: `users`, `deliberations`, `personas`, `artifacts`, `usage_events`, `api_keys`. Run `python -m council.db.migrations` to apply schema.
+```text
+POST   /runs                          Create and enqueue a new council run (returns 202)
+GET    /runs                          List runs for the authenticated user
+GET    /runs/{run_id}                 Poll run status
+GET    /runs/{run_id}/artifact        Get structured deliberation artifact (json or markdown)
+GET    /runs/{run_id}/sandbox/stream  Get VNC stream URL for a computer-use run
+GET    /me/entitlements               Available features (open-source tier — no limits)
+GET    /me/usage                      Month-to-date run count
+GET    /me/personas                   List personas (seeds prebuilt from agents.yaml + canned)
+POST   /me/personas                   Create a custom persona
+GET    /me/personas/{id}              Get a single persona
+PUT    /me/personas/{id}              Update a persona
+DELETE /me/personas/{id}             Delete a persona
+POST   /me/personas/questionnaire     Generate a persona via LLM from structured questionnaire
+GET    /me/config                     Get per-user council run configuration
+PUT    /me/config                     Update council run configuration (agents, rounds, model)
+POST   /webhooks/zoom                 Zoom webhook receiver (posts artifact to chat on meeting.ended)
+POST   /internal/run-events           Worker→API event bridge (used when COUNCIL_API_EVENT_BRIDGE_URL is set)
+GET    /health                        Health check (not in schema)
+GET    /readiness                     Readiness check with DATABASE_URL presence validation
+```
 
-The `users` table has `tos_accepted_at` (Float, nullable) and `tos_version` (String(32), nullable) columns for ToS tracking. The `User` ORM model lives in `council/db/models.py`.
-
-The `api_keys` table stores user-generated programmatic API keys. The `ApiKey` ORM model (`council/db/models.py`) has fields: `id`, `owner_id` (Clerk user ID), `name`, `key_hash` (sha256 — plaintext is never stored), `key_prefix` (display only), `created_at`, `last_used_at`, `is_active`.
+The `POST /api/legal/accept` and `GET /api/legal/status` endpoints are declared in the module docstring but **not yet implemented**. The `TosAcceptance` ORM model and `users.tos_accepted_at` / `users.tos_version` columns are in place for when these endpoints land.
 
 ### Feature Access
 
@@ -110,14 +128,37 @@ The app exposes an open-source entitlement payload at `GET /me/entitlements` tha
 
 ### Rate-Limit Headers
 
-`POST /runs` and persona-creation endpoints (`POST /me/personas`, `POST /me/personas/questionnaire`) return `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset` headers via the `add_rate_limit_headers` middleware in `council/api/app.py`.
+The `add_rate_limit_headers` middleware in `council/api/app.py` is currently a pass-through. Rate limiting is enforced at the application level, not via response headers.
 
-### Legal / ToS Endpoints
+### MCP Server
 
-- `POST /api/legal/accept` — record ToS acceptance (body: `{"version": "2026-04-01"}`). Stores timestamp + version. Update `CURRENT_TOS_VERSION` in `app.py` when the ToS changes.
-- `GET  /api/legal/status` — returns `tos_accepted`, `current_version`, `accepted_version`, `accepted_at`.
+A FastMCP server is mounted at `/mcp` on the FastAPI app, exposing council debates as tools for IDE clients (Cursor, Claude Desktop). MCP is always enabled for self-hosted instances.
 
-Accepted ToS data is currently stored in-memory (`_tos_store`) and should be migrated to the `users` table (`tos_accepted_at` / `tos_version` columns) when full DB-backed auth lands.
+Available MCP tools:
+
+- `council_run(question, config?)` — create and enqueue a council run
+- `sandbox_run(question, config?)` — create and enqueue a sandbox (code execution) run
+- `council_poll(run_id)` — poll a run by ID (alias: `council_status`)
+- `council_status(run_id)` — return the current status of a run
+- `council_artifact(run_id, format?)` — retrieve the structured deliberation artifact (`json` or `markdown`)
+
+### Sandbox (`council/features/sandbox.py`)
+
+Two sandbox modes, both Docker-based:
+
+1. **Code execution** — runs a bounded shell command in a container; command is validated against an allowlist and shell metacharacter check before queuing (`_validate_sandbox_cmd`)
+2. **Desktop (VNC/noVNC)** — optional Ubuntu container with VNC for computer-use workflows; stream URL served at `GET /runs/{run_id}/sandbox/stream`
+
+Enable via `computer_use_enabled=true` on a run; requires Docker daemon.
+
+### Zoom Webhook Integration
+
+`POST /webhooks/zoom` handles Zoom events:
+
+- `endpoint.url_validation` — responds to Zoom's URL validation challenge
+- `meeting.ended` — extracts a council `run_id` from the meeting topic (format: `[council:<run_id>:<hmac_token>]`) and posts the markdown artifact to the meeting's chat channel
+
+Requires `ZOOM_WEBHOOK_SECRET_TOKEN` (signature verification), `ZOOM_RUN_SECRET` (HMAC-SHA256 token in meeting topic), and `ZOOM_API_TOKEN` (posting to chat).
 
 ### Web App (`web/`)
 
@@ -127,23 +168,63 @@ Next.js 16 with React 19, Tailwind CSS 4, TanStack Query, and Radix UI. Uses App
 
 TypeScript types in `web/lib/api.ts` mirror the Python Pydantic models — keep them in sync when changing backend schemas.
 
-**Authentication:** Currently uses a simple bearer token (`API_SECRET_KEY`) for development. For production, integrate your preferred auth system (OAuth2, JWT, API keys, etc.). The backend `get_current_user()` dependency extracts the user ID from the bearer token and validates it against configured secrets or API key hashes.
+App routes (all under `web/app/(app)/`):
 
-### MCP Server
+- `/` — dashboard (`dashboard/page.tsx`)
+- `/runs` — run list (`runs/page.tsx`)
+- `/runs/[id]` — run detail with live WebSocket feed (`runs/[id]/page.tsx`)
+- `/personas` — persona management (`personas/page.tsx`)
+- `/settings` — council settings: agents, rounds, model (`settings/page.tsx`)
+- `/integrations` — Zoom and MCP integration config (`integrations/page.tsx`)
+- `/usage` — month-to-date usage (`usage/page.tsx`)
 
-A FastMCP server is mounted at `/mcp` on the FastAPI app, exposing council debates as tools for IDE clients (Cursor, Claude Desktop).
+**Authentication:** No login screen. All routes are public. `web/lib/auth.tsx` exports `useAuth()` which reads `NEXT_PUBLIC_API_TOKEN` (the same value as `API_SECRET_KEY`) for API calls. Set `NEXT_PUBLIC_API_TOKEN` in `web/.env.local` if the backend `API_SECRET_KEY` is configured.
+
+### Database Schema (`council/db/`)
+
+SQLAlchemy 2.0 async with asyncpg. Key tables:
+
+- `users` — registered accounts; `tos_accepted_at` (Float) and `tos_version` (String(32)) columns for ToS tracking
+- `deliberations` — council runs (maps to `run_id`)
+- `personas` — saved agent personas per user
+- `artifacts` — synthesized output from completed runs
+- `usage_events` — per-run usage accounting
+- `api_keys` — user-generated API keys (sha256 hash stored, never plaintext)
+- `tos_acceptances` — per-owner ToS acceptance keyed by `owner_id`; stores `version` + `accepted_at`
+
+Run `python -m council.db.migrations` to apply schema.
 
 ## Key Environment Variables
 
 ```bash
-OPENROUTER_API_KEY=...          # Primary LLM provider
-XAI_API_KEY=...                 # Optional: native Grok (cheaper)
+# LLM providers
+OPENROUTER_API_KEY=...          # Required: primary LLM provider
+XAI_API_KEY=...                 # Optional: native Grok API (cheaper for grok-* models)
+
+# API auth
 API_SECRET_KEY=...              # Dev bearer token (min 32 chars in production)
+CORS_ORIGINS=http://localhost:3000  # Comma-separated allowed CORS origins (no wildcard)
+
+# Infrastructure
 DATABASE_URL=postgresql+asyncpg://council:council@localhost:5432/council
 REDIS_URL=redis://localhost:6379/0
 CELERY_BROKER_URL=redis://localhost:6379/1
+CELERY_RESULT_BACKEND=redis://localhost:6379/1
+
+# Frontend
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
-TAVILY_API_KEY=...              # Optional: web search capability
-COUNCIL_DISABLE_WORKER=0        # 1 = run Celery in-process
+NEXT_PUBLIC_API_TOKEN=...       # Same as API_SECRET_KEY; set in web/.env.local
+
+# Optional integrations
+TAVILY_API_KEY=...              # Web search capability
+ZOOM_WEBHOOK_SECRET_TOKEN=...   # Zoom webhook signature verification
+ZOOM_RUN_SECRET=...             # HMAC secret for run_id in Zoom meeting topics
+ZOOM_API_TOKEN=...              # Zoom API Bearer token for posting to chat
+
+# Behavior flags
+COUNCIL_DISABLE_WORKER=0        # 1 = run Celery in-process (dev/test)
 COUNCIL_GUARDRAILS=1            # 0 = disable content guardrails
+ALLOW_WEBSOCKET_QUERY_TOKEN=0   # 1 = allow ?token= fallback on WebSocket (insecure)
+HIDE_DOCS=0                     # 1 = disable /docs, /redoc, /openapi.json
+COUNCIL_API_EVENT_BRIDGE_URL=...# Set on Celery worker to bridge events to the API over HTTP
 ```
