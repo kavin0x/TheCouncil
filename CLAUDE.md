@@ -85,7 +85,7 @@ Long-running runs are enqueued via Celery (`council/worker/`). Set `COUNCIL_DISA
 
 Four modes configure how agent personas are created:
 
-- **CANNED** — hardcoded personas (Security Architect, Red Teamer, etc.)
+- **CANNED (built-in)** — hardcoded, built-in personas (The Skeptic, The Optimist, The Realist, The Visionary, The Analyst)
 - **DYNAMIC** — LLM-generated at runtime from the debate topic
 - **HYBRID** — mix of canned + dynamic
 - **GENERATED** — cloned from user-provided text

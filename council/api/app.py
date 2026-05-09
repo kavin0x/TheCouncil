@@ -835,7 +835,7 @@ def _seed_prebuilt_personas(owner_id: str) -> None:
             updated_at=now,
             is_prebuilt=True,
             is_active=True,
-            source="canned",
+            source="built-in",
         )
 
 
