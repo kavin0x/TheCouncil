@@ -1298,7 +1298,7 @@ function CouncilConfigPanel() {
               )}
             </div>
             <p className="text-xs text-zinc-500">
-              Choose which personas participate as agents in your council debates.
+              Choose which personas and models participate as agents in your council debates. Find models here: <a href="https://openrouter.ai/models?input_modalities=text&supported_parameters=tools" target="_blank" rel="noopener noreferrer" className="text-violet-400 hover:text-violet-300 transition-colors">https://openrouter.ai/models</a>.
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-60 overflow-y-auto">
               {personas.data
