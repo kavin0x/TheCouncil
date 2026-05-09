@@ -102,7 +102,7 @@ def cmd_run(
     ),
     no_guardrails: bool = typer.Option(False, "--no-guardrails", help="Disable content guardrails."),
     api: bool = typer.Option(
-        False, "--api", help="Submit run to the Council API instead of running locally."
+        False, "--api", help="(deprecated) Submit run to the Council API; CLI now starts and connects to the backend by default."
     ),
     wait: bool = typer.Option(True, "--wait/--no-wait", help="When using --api, poll until done."),
     output_file: Optional[Path] = typer.Option(
@@ -120,20 +120,20 @@ def cmd_run(
     By default runs locally. Use [bold]--api[/] to submit to the Council API
     (requires [bold]COUNCIL_API_TOKEN[/] and optionally [bold]COUNCIL_API_URL[/]).
     """
-    if api:
-        _run_via_api(question, mode, agents, rounds, wait, output_file, web_search, computer_use)
-    else:
-        if web_search:
-            console.print(
-                "[yellow]Note:[/] --web-search requires TAVILY_API_KEY environment variable. "
-                "(local runs do not contact external APIs)."
-            )
-        if computer_use:
-            console.print(
-                "[yellow]Note:[/] --computer-use requires Docker daemon running. "
-                "(local runs do not spawn Docker containers by default)."
-            )
-        _run_local(question, mode, agents, rounds, config_file, no_guardrails, output_file)
+    # New behavior: the CLI acts as a client to the backend API. If the API
+    # is not reachable, attempt to start a local uvicorn server and wait for
+    # it to become healthy before submitting the run.
+    if web_search:
+        console.print(
+            "[yellow]Note:[/] --web-search requires TAVILY_API_KEY environment variable."
+        )
+    if computer_use:
+        console.print(
+            "[yellow]Note:[/] --computer-use requires Docker daemon running."
+        )
+
+    _ensure_backend_running()
+    _run_via_api(question, mode, agents, rounds, wait, output_file, web_search, computer_use)
 
 
 def _run_local(
@@ -146,25 +146,62 @@ def _run_local(
     output_file: Optional[Path],
 ) -> None:
     """Run the debate engine locally (imports council.core.council)."""
-    from council.core.council import main as council_main
+    # Local mode is deprecated. Prefer running the backend and connecting via
+    # the API. This function is retained for compatibility but delegates to
+    # the API-backed flow by ensuring the backend is running and submitting
+    # the run remotely.
+    _ensure_backend_running()
+    _run_via_api(question, mode, agents, rounds, wait=True, output_file=output_file)
 
-    argv = [question]
-    if mode:
-        argv += ["--mode", mode]
-    if agents:
-        argv += ["--agents", str(agents)]
-    if config_file:
-        argv += ["--config", str(config_file)]
-    if no_guardrails:
-        argv += ["--no-guardrails"]
 
-    # Override sys.argv so the argparse-based main() picks it up
-    original_argv = sys.argv[:]
-    sys.argv = ["council"] + argv
+def _ensure_backend_running(timeout: float = 15.0) -> None:
+    """Ensure the Council API is reachable; if not, start a local uvicorn server.
+
+    This tries the configured `COUNCIL_API_URL` (defaults to http://localhost:8000)
+    and starts `python -m uvicorn council.api.app:app` if the health endpoint
+    does not respond within a short window. It waits until `/health` returns
+    success or the timeout elapses.
+    """
+    import subprocess
+    import time
+    from urllib.parse import urlparse
+
+    base = os.getenv(_ENV_API_URL, "http://localhost:8000")
+    parsed = urlparse(base)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or 8000
+    health_url = f"http://{host}:{port}/health"
+
+    import httpx
+
+    def _ping() -> bool:
+        try:
+            with httpx.Client(timeout=2) as c:
+                r = c.get(health_url)
+                return r.status_code == 200
+        except Exception:
+            return False
+
+    if _ping():
+        return
+
+    console.print(f"[dim]Starting local backend at http://{host}:{port}…[/]")
+    cmd = [sys.executable, "-m", "uvicorn", "council.api.app:app", "--host", host, "--port", str(port), "--reload"]
     try:
-        council_main()
-    finally:
-        sys.argv = original_argv
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as exc:
+        console.print(f"[red]Failed to start backend:[/] {exc}")
+        raise typer.Exit(1)
+
+    # Poll health until timeout
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if _ping():
+            console.print(f"[green]Backend is ready (pid={proc.pid})[/]")
+            return
+        time.sleep(0.5)
+
+    console.print("[yellow]Warning: backend did not become healthy within timeout.[/]")
 
 
 def _run_via_api(
