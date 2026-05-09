@@ -168,6 +168,8 @@ Next.js 16 with React 19, Tailwind CSS 4, TanStack Query, and Radix UI. Uses App
 
 TypeScript types in `web/lib/api.ts` mirror the Python Pydantic models — keep them in sync when changing backend schemas.
 
+Persona records now persist a `model` field. The personas page lets users edit that field as free text, and the council run path snapshots selected personas into `run.config.selected_personas` so the worker can execute each agent with its own model. Prebuilt/canned personas are seeded with the deployment default model and remain editable.
+
 App routes (all under `web/app/(app)/`):
 
 - `/` — dashboard (`dashboard/page.tsx`)

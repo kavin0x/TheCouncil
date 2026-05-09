@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
@@ -126,6 +126,7 @@ interface PersonaFormData {
   name: string;
   mode: string;
   system_prompt: string;
+  model: string;
   description: string;
   mbti: string;
   job_role: string;
@@ -261,6 +262,7 @@ function PersonaDialog({
     name: initial?.name ?? "",
     mode: initial?.mode ?? "custom",
     system_prompt: initial?.system_prompt ?? "",
+    model: initial?.model ?? "",
     description: initial?.description ?? "",
     mbti: initial?.mbti ?? "",
     job_role: initial?.job_role ?? "",
@@ -1189,8 +1191,28 @@ function CouncilConfigPanel() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["council-config"] }),
   });
 
+  const updatePersonaModel = useMutation({
+    mutationFn: (body: { personaId: string; model: string }) =>
+      api.updatePersona(getToken, body.personaId, { model: body.model.trim() || undefined }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["personas"] }),
+  });
+
   const [localAgents, setLocalAgents] = useState<number | null>(null);
   const [localRounds, setLocalRounds] = useState<number | null>(null);
+  const [modelDrafts, setModelDrafts] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!personas.data) return;
+    setModelDrafts((current) => {
+      const next = { ...current };
+      for (const persona of personas.data) {
+        if (!(persona.persona_id in next)) {
+          next[persona.persona_id] = persona.model ?? "";
+        }
+      }
+      return next;
+    });
+  }, [personas.data]);
 
   const numAgents = localAgents ?? config.data?.num_agents ?? 6;
   const numRounds = localRounds ?? config.data?.num_rounds ?? 4;
@@ -1203,6 +1225,11 @@ function CouncilConfigPanel() {
       ? selectedIds.filter((x) => x !== id)
       : [...selectedIds, id];
     updateConfig.mutate({ selected_persona_ids: next });
+  }
+
+  function commitPersonaModel(personaId: string) {
+    const model = modelDrafts[personaId] ?? "";
+    updatePersonaModel.mutate({ personaId, model });
   }
 
   function saveSettings() {
@@ -1277,27 +1304,51 @@ function CouncilConfigPanel() {
               {personas.data
                 .filter((p) => p.is_active)
                 .map((p) => (
-                  <button
+                  <div
                     key={p.persona_id}
-                    type="button"
-                    onClick={() => togglePersona(p.persona_id)}
-                    className={`flex items-center gap-2 rounded-lg border p-2.5 text-left text-xs transition-colors ${
+                    className={`rounded-lg border p-2.5 text-left text-xs transition-colors ${
                       selectedIds.includes(p.persona_id)
                         ? "border-violet-500/50 bg-violet-600/10 text-violet-200"
-                        : "border-zinc-700 bg-zinc-800/50 text-zinc-400 hover:border-zinc-600"
+                        : "border-zinc-700 bg-zinc-800/50 text-zinc-400"
                     }`}
                   >
-                    <Bot className="h-3.5 w-3.5 shrink-0" />
-                    <div className="min-w-0">
-                      <span className="block truncate font-medium text-white">{p.name}</span>
-                      {p.description && (
-                        <span className="block truncate text-zinc-500">{p.description}</span>
+                    <div className="flex items-start gap-2">
+                      <button
+                        type="button"
+                        onClick={() => togglePersona(p.persona_id)}
+                        className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border border-zinc-700 bg-zinc-900/60 text-[10px] text-zinc-300 transition-colors hover:border-violet-500 hover:text-violet-300"
+                        title={selectedIds.includes(p.persona_id) ? "Remove from run" : "Add to run"}
+                      >
+                        {selectedIds.includes(p.persona_id) ? "✓" : ""}
+                      </button>
+                      <div className="min-w-0 flex-1">
+                        <span className="block truncate font-medium text-white">{p.name}</span>
+                        {p.description && (
+                          <span className="block truncate text-zinc-500">{p.description}</span>
+                        )}
+                        <div className="mt-2 space-y-1">
+                          <Label className="block text-[10px] uppercase tracking-wide text-zinc-500">
+                            Model
+                          </Label>
+                          <Input
+                            value={modelDrafts[p.persona_id] ?? p.model ?? ""}
+                            placeholder="Type a compatible model id"
+                            onChange={(e) =>
+                              setModelDrafts((current) => ({
+                                ...current,
+                                [p.persona_id]: e.target.value,
+                              }))
+                            }
+                            onBlur={() => commitPersonaModel(p.persona_id)}
+                            className="h-7 text-xs"
+                          />
+                        </div>
+                      </div>
+                      {selectedIds.includes(p.persona_id) && (
+                        <span className="shrink-0 text-violet-400">&#10003;</span>
                       )}
                     </div>
-                    {selectedIds.includes(p.persona_id) && (
-                      <span className="ml-auto shrink-0 text-violet-400">&#10003;</span>
-                    )}
-                  </button>
+                  </div>
                 ))}
             </div>
             {selectedIds.length === 0 && personas.data.filter((p) => p.is_active).length > 0 && (
@@ -1357,6 +1408,18 @@ function EditPersonaForm({
             </SelectContent>
           </Select>
         </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label>Model</Label>
+        <Input
+          placeholder="e.g. x-ai/grok-4.3 or openai/gpt-4.1-mini"
+          value={form.model}
+          onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))}
+        />
+        <p className="text-xs text-zinc-500">
+          Type an OpenRouter model in provider/model format. This model is used when the persona joins a run.
+        </p>
       </div>
 
       <div className="grid grid-cols-2 gap-4">
@@ -1764,6 +1827,7 @@ export default function PersonasPage() {
         ...d,
         mbti: d.mbti || undefined,
         job_role: d.job_role || undefined,
+        model: d.model.trim() || undefined,
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["personas"] }),
     onError: (e: Error & { status?: number }) => {
@@ -1779,6 +1843,7 @@ export default function PersonasPage() {
         ...d,
         mbti: d.mbti || undefined,
         job_role: d.job_role || undefined,
+        model: d.model.trim() || undefined,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["personas"] });
@@ -2082,6 +2147,7 @@ export default function PersonasPage() {
                 name: editPersona.name,
                 mode: editPersona.mode,
                 system_prompt: editPersona.system_prompt,
+                model: editPersona.model ?? "",
                 description: editPersona.description ?? "",
                 mbti: editPersona.mbti ?? "",
                 job_role: editPersona.job_role ?? "",

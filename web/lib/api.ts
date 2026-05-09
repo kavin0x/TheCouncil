@@ -40,6 +40,7 @@ export interface Persona {
   name: string;
   mode: string;
   system_prompt: string;
+  model: string | null;
   description: string | null;
   created_at: number;
   updated_at: number | null;
@@ -234,6 +235,7 @@ export const api = {
       name: string;
       mode: string;
       system_prompt: string;
+      model?: string;
       description?: string;
       mbti?: string;
       job_role?: string;
@@ -252,6 +254,7 @@ export const api = {
       name?: string;
       mode?: string;
       system_prompt?: string;
+      model?: string;
       description?: string;
       mbti?: string;
       job_role?: string;

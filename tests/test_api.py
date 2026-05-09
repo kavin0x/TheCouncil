@@ -14,6 +14,7 @@ from httpx import AsyncClient, ASGITransport
 os.environ["API_SECRET_KEY"] = "test-secret-key"
 
 from council.api import app  # noqa: E402  (import after env setup)
+from council.models.state import run_store  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -56,6 +57,20 @@ class TestAuth:
     async def test_missing_auth_returns_401(self, client):
         resp = await client.post("/runs", json={"question": "hi"})
         assert resp.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_cors_preflight_allows_loopback_frontend_origin(self, client):
+        resp = await client.options(
+            "/runs",
+            headers={
+                "Origin": "http://127.0.2.2:3000",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "authorization,content-type,x-requested-with",
+            },
+        )
+
+        assert resp.status_code == 200
+        assert resp.headers["access-control-allow-origin"] == "http://127.0.2.2:3000"
 
     @pytest.mark.asyncio
     async def test_wrong_token_returns_401(self, client):
@@ -137,6 +152,47 @@ class TestCreateRun:
             headers=AUTH,
         )
         assert resp.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_create_run_snapshots_selected_persona_models(self, client):
+        persona_resp = await client.post(
+            "/me/personas",
+            json={
+                "name": "Modelled Persona",
+                "mode": "custom",
+                "system_prompt": "You are concise and analytical.",
+                "model": "x-ai/grok-4.3",
+            },
+            headers=AUTH,
+        )
+        assert persona_resp.status_code == 201
+        persona_id = persona_resp.json()["persona_id"]
+
+        resp = await client.post(
+            "/runs",
+            json={
+                "question": "Should we change the model wiring?",
+                "config": {"selected_persona_ids": [persona_id]},
+            },
+            headers=AUTH,
+        )
+        assert resp.status_code == 202
+        run_id = resp.json()["run_id"]
+
+        run = await run_store.get(run_id)
+        assert run.config["selected_personas"][0]["persona_id"] == persona_id
+        assert run.config["selected_personas"][0]["model"] == "x-ai/grok-4.3"
+
+
+class TestPersonas:
+    @pytest.mark.asyncio
+    async def test_prebuilt_personas_include_model(self, client):
+        resp = await client.get("/me/personas", headers=AUTH)
+        assert resp.status_code == 200
+        personas = resp.json()
+        prebuilt = [p for p in personas if p["is_prebuilt"]]
+        assert prebuilt
+        assert all(isinstance(p["model"], str) and p["model"] for p in prebuilt)
 
 
 # ---------------------------------------------------------------------------

@@ -89,12 +89,15 @@ async def run_council_for_api(
         base_agents, settings = council.load_config(config_path or DEFAULT_CONFIG_PATH)
         default_model = settings.get("model", council.MODEL)
 
+        selected_personas = cfg.get("selected_personas")
         personality_mode = _parse_mode(cfg.get("mode"))
         generated_data = cfg.get("generated_data")
         topic = question
 
         # Resolve agents
-        if personality_mode is None:
+        if isinstance(selected_personas, list) and selected_personas:
+            agents = council._dicts_to_agents(selected_personas)
+        elif personality_mode is None:
             agents = council._resolve_default_agents(base_agents, generated_data, topic=topic)
         elif personality_mode == PersonalityMode.DYNAMIC:
             n = _effective_num_agents(cfg, default=5)

@@ -57,6 +57,7 @@ from fastmcp.server.dependencies import get_http_request  # noqa: E402
 from fastmcp.utilities.lifespan import combine_lifespans  # noqa: E402
 from pydantic import BaseModel, ConfigDict, Field
 
+from council.core.council import MODEL as DEFAULT_MODEL
 from council.core.runner import CouncilRunBlockedError, run_council_for_api
 from council.realtime import emit_run_event, register_ws_broadcast
 from council.models.state import (
@@ -152,6 +153,13 @@ if "*" in _cors_origins:
         "Set CORS_ORIGINS to one or more explicit allowed origins."
     )
 
+_cors_origin_regex = None
+if any(re.match(r"^https?://(?:localhost|127(?:\.\d{1,3}){3})(?::\d+)?$", origin) for origin in _cors_origins):
+    # Allow local-loopback frontend hosts such as localhost and 127.0.2.2 during dev.
+    # This keeps explicit production origins intact while avoiding CORS preflight 400s
+    # when the browser opens the web app on a different loopback alias than the API.
+    _cors_origin_regex = r"^https?://(?:localhost|127(?:\.\d{1,3}){3})(?::\d+)?$"
+
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):  # type: ignore[type-arg]
@@ -175,10 +183,10 @@ async def add_rate_limit_headers(request: Request, call_next):  # type: ignore[t
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
+    allow_origin_regex=_cors_origin_regex,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
-    allow_private_network=True,
 )
 
 app.mount("/mcp", _mcp_app)
@@ -559,6 +567,14 @@ async def create_run(
     run_config["web_search_enabled"] = body.web_search_enabled
     run_config["computer_use_enabled"] = body.computer_use_enabled
 
+    selected_ids = run_config.get("selected_persona_ids") or []
+    if selected_ids:
+        _seed_prebuilt_personas(auth.owner_id)
+        run_config["selected_personas"] = [
+            _persona_snapshot_for_run(_get_owned_persona(pid, auth.owner_id))
+            for pid in selected_ids
+        ]
+
     run = await run_store.create(
         question=body.question,
         config=run_config,
@@ -764,6 +780,7 @@ class PersonaRecord(BaseModel):
     name: str
     mode: str
     system_prompt: str
+    model: str | None = None
     description: str | None = None
     owner_id: str
     created_at: float
@@ -810,6 +827,7 @@ def _seed_prebuilt_personas(owner_id: str) -> None:
                 name=agent["name"],
                 mode="prebuilt",
                 system_prompt=agent.get("system_prompt", ""),
+                model=agent.get("model") or DEFAULT_MODEL,
                 description=agent.get("role", ""),
                 owner_id=owner_id,
                 created_at=now,
@@ -829,6 +847,7 @@ def _seed_prebuilt_personas(owner_id: str) -> None:
             name=canned["name"],
             mode="canned",
             system_prompt=canned.get("system_prompt", ""),
+            model=canned.get("model") or DEFAULT_MODEL,
             description=canned.get("role", ""),
             owner_id=owner_id,
             created_at=now,
@@ -843,6 +862,7 @@ class CreatePersonaRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     mode: str = Field(default="custom", description="canned | mbti | custom | prebuilt | questionnaire")
     system_prompt: str = Field(..., min_length=1, max_length=8000)
+    model: str | None = Field(None, max_length=128)
     description: str | None = None
     mbti: str | None = None
     job_role: str | None = None
@@ -853,6 +873,7 @@ class UpdatePersonaRequest(BaseModel):
     name: str | None = None
     mode: str | None = None
     system_prompt: str | None = None
+    model: str | None = Field(None, max_length=128)
     description: str | None = None
     mbti: str | None = None
     job_role: str | None = None
@@ -875,6 +896,12 @@ class CouncilConfigRequest(BaseModel):
     num_rounds: int | None = Field(None, ge=1, le=12)
     selected_persona_ids: list[str] | None = Field(None, description="Which personas to use as agents")
     model: str | None = None
+
+
+def _persona_snapshot_for_run(persona: PersonaRecord) -> dict[str, Any]:
+    data = persona.model_dump(exclude={"owner_id"})
+    data["model"] = data.get("model") or DEFAULT_MODEL
+    return data
 
 
 def _get_owned_persona(persona_id: str, owner_id: str) -> PersonaRecord:
@@ -912,6 +939,7 @@ async def create_persona(
         name=body.name,
         mode=body.mode,
         system_prompt=body.system_prompt,
+        model=body.model or DEFAULT_MODEL,
         description=body.description,
         owner_id=auth.owner_id,
         created_at=now,
@@ -1037,6 +1065,7 @@ async def create_persona_from_questionnaire(
         name=name,
         mode="questionnaire",
         system_prompt=system_prompt,
+        model=DEFAULT_MODEL,
         description=str(generated.get("description", "")),
         owner_id=auth.owner_id,
         created_at=now,

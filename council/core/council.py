@@ -63,7 +63,7 @@ from council.features.personalities import (
 
 load_dotenv()
 
-MODEL = "grok-4.3"
+MODEL = "x-ai/grok-4.3"
 PROFILE_BUILDER_MODEL = "x-ai/grok-4-1-fast-non-reasoning"
 API_BASE = "https://openrouter.ai/api/v1"
 XAI_API_BASE = "https://api.x.ai/v1"
@@ -72,6 +72,7 @@ DEFAULT_GENERATED_PEOPLE_FILE = Path(__file__).parent / "sessions" / "generated_
 
 # Map OpenRouter x-ai model IDs to native XAI model IDs (for direct XAI API)
 XAI_MODEL_MAP = {
+    "x-ai/grok-4.3": "grok-4.20-multi-agent-beta-0309",
     "grok-4.3": "grok-4.20-multi-agent-beta-0309",
     "grok-4.3-0309": "grok-4.20-multi-agent-beta-0309",
     "x-ai/grok-4.20-0309-non-reasoning": "grok-4.20-0309-non-reasoning",
