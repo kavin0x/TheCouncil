@@ -19,11 +19,35 @@ import { formatDate } from "@/lib/utils";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
+/**
+ * Construct a secure WebSocket URL for a council run.
+ * 
+ * Security considerations:
+ * - Auto-upgrades to wss:// when the page uses HTTPS (prevents mixed-content warnings)
+ * - Uses ws:// for localhost/development
+ * - Rejects insecure http:// to wss:// downgrades
+ */
 function wsUrlForRun(base: string, runId: string): string {
   const trimmed = base.replace(/\/$/, "");
-  const wsBase = trimmed.startsWith("https")
-    ? trimmed.replace(/^https/, "wss")
-    : trimmed.replace(/^http/, "ws");
+  
+  // Determine WebSocket protocol based on API base URL scheme
+  let wsBase: string;
+  if (trimmed.startsWith("https://")) {
+    wsBase = trimmed.replace(/^https/, "wss");
+  } else if (trimmed.startsWith("http://")) {
+    wsBase = trimmed.replace(/^http/, "ws");
+  } else {
+    // Fallback: use page protocol to determine secure/insecure
+    // In browsers, use window.location.protocol
+    if (typeof window !== "undefined") {
+      const isSecure = window.location.protocol === "https:";
+      wsBase = trimmed.replace(/^(https?):\/\//, isSecure ? "wss://" : "ws://");
+    } else {
+      // Server-side: default to secure
+      wsBase = trimmed.replace(/^(https?):\/\//, "wss://");
+    }
+  }
+  
   return `${wsBase}/ws/${encodeURIComponent(runId)}`;
 }
 

@@ -154,6 +154,44 @@ def _run_local(
     _run_via_api(question, mode, agents, rounds, wait=True, output_file=output_file)
 
 
+def _validate_and_parse_api_url(url: str) -> tuple[str, int]:
+    """
+    Safely validate and parse COUNCIL_API_URL to extract host and port.
+    
+    Validates that:
+    - Host is alphanumeric, hyphens, dots, or 'localhost'/'127.0.0.1' (no shell metacharacters)
+    - Port is a valid integer in range 1-65535
+    - URL is properly formed
+    
+    Raises ValueError if validation fails.
+    """
+    import re
+    from urllib.parse import urlparse
+    
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname or "127.0.0.1"
+        port = parsed.port or 8000
+        
+        # Validate host: alphanumeric, hyphens, dots only
+        # Allow localhost, 127.0.0.1, IPv6 loopback, and standard DNS names
+        if not re.match(r"^[a-zA-Z0-9\-.:]+$", host):
+            raise ValueError(f"Invalid hostname: contains disallowed characters")
+        
+        # Reject shell metacharacters in hostname
+        shell_metacharacters = set(";|&`$()\\<>\"'~!{}\n\r")
+        if any(char in host for char in shell_metacharacters):
+            raise ValueError(f"Invalid hostname: contains shell metacharacters")
+        
+        # Validate port is in valid range
+        if not isinstance(port, int) or port < 1 or port > 65535:
+            raise ValueError(f"Invalid port: {port} (must be 1-65535)")
+        
+        return host, port
+    except (AttributeError, ValueError, TypeError) as e:
+        raise ValueError(f"Invalid COUNCIL_API_URL '{url}': {e}")
+
+
 def _ensure_backend_running(timeout: float = 15.0) -> None:
     """Ensure the Council API is reachable; if not, start a local uvicorn server.
 
@@ -161,15 +199,21 @@ def _ensure_backend_running(timeout: float = 15.0) -> None:
     and starts `python -m uvicorn council.api.app:app` if the health endpoint
     does not respond within a short window. It waits until `/health` returns
     success or the timeout elapses.
+    
+    Validates the URL to prevent command injection attacks.
     """
     import subprocess
     import time
-    from urllib.parse import urlparse
 
     base = os.getenv(_ENV_API_URL, "http://localhost:8000")
-    parsed = urlparse(base)
-    host = parsed.hostname or "127.0.0.1"
-    port = parsed.port or 8000
+    
+    # Validate URL to prevent command injection
+    try:
+        host, port = _validate_and_parse_api_url(base)
+    except ValueError as e:
+        console.print(f"[red]Invalid COUNCIL_API_URL:[/] {e}")
+        raise typer.Exit(1)
+    
     health_url = f"http://{host}:{port}/health"
 
     import httpx

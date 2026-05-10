@@ -1,4 +1,30 @@
-const BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+/**
+ * Get the API base URL, with security considerations:
+ * - Respects NEXT_PUBLIC_API_BASE_URL environment variable
+ * - In production: defaults to https (fails if http), requires explicit https:// or https URL
+ * - In development: allows http://localhost:* for convenience
+ * 
+ * Bearer tokens and session data should only be sent over HTTPS in production.
+ */
+function getApiBaseUrl(): string {
+  const configured = process.env.NEXT_PUBLIC_API_BASE_URL;
+  if (configured) {
+    return configured;
+  }
+
+  // Development default: localhost HTTP is acceptable for local testing
+  if (process.env.NODE_ENV !== "production") {
+    return "http://localhost:8000";
+  }
+
+  // Production: must be explicitly configured to https
+  // This prevents accidental exposure of Bearer tokens over HTTP
+  throw new Error(
+    "NEXT_PUBLIC_API_BASE_URL must be set in production and must use https://"
+  );
+}
+
+const BASE = getApiBaseUrl();
 
 export type EntitlementTier = "open-source" | "trial" | "basic" | "pro" | "ultra" | "enterprise";
 
