@@ -88,7 +88,6 @@ export default function DashboardPage() {
                 { key: "ide_plugins_enabled", label: "IDE plugins" },
                 { key: "custom_mcp_enabled", label: "Custom MCP" },
                 { key: "computer_use_enabled", label: "Computer use" },
-                { key: "sso_enabled", label: "SSO" },
               ].map(({ key, label }) => {
                 const enabled = ent.data!.features[key as keyof typeof ent.data.features];
                 return (

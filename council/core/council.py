@@ -52,6 +52,7 @@ from rich.text import Text
 
 from council.features.guardrails import Guardrails
 from council.features.personalities import (
+    CUSTOM_AGENTS,
     JobRole,
     JOB_ROLE_INSTRUCTIONS,
     PersonalityMode,
@@ -166,6 +167,19 @@ class DebateSession:
 # ---------------------------------------------------------------------------
 
 def load_config(config_path: Path) -> tuple[list[Agent], dict]:
+    """Load agent configuration from YAML file, with fallback to CUSTOM_AGENTS.
+    
+    If the YAML file doesn't exist, returns built-in CUSTOM_AGENTS and default settings.
+    """
+    if not config_path.exists():
+        # Fallback to embedded custom agents when file is missing
+        agents = _dicts_to_agents(list(CUSTOM_AGENTS))
+        return agents, {
+            "model": "grok-4.3",
+            "stream_cross_debate": True,
+            "show_dm_indicators": True,
+        }
+    
     with open(config_path) as f:
         raw = yaml.safe_load(f)
     agents = _dicts_to_agents(raw.get("agents", []))

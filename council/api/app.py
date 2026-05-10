@@ -799,7 +799,7 @@ _council_config_store: dict[str, dict[str, Any]] = {}
 
 
 def _seed_prebuilt_personas(owner_id: str) -> None:
-    """Seed prebuilt personas from agents.yaml and canned templates for an owner."""
+    """Seed prebuilt personas from agents.yaml, CUSTOM_AGENTS, and canned templates for an owner."""
     already_seeded = any(
         p.owner_id == owner_id and p.is_prebuilt
         for p in _persona_store.values()
@@ -809,9 +809,10 @@ def _seed_prebuilt_personas(owner_id: str) -> None:
 
     now = time.time()
 
-    # Seed from agents.yaml
+    # Seed from agents.yaml if it exists
     import yaml as _yaml
     from pathlib import Path as _Path
+    from council.features.personalities import CANNED_PERSONALITIES, CUSTOM_AGENTS
 
     agents_yaml_path = _Path(__file__).parent.parent / "agents.yaml"
     if not agents_yaml_path.exists():
@@ -836,10 +837,26 @@ def _seed_prebuilt_personas(owner_id: str) -> None:
                 is_active=True,
                 source="agents.yaml",
             )
+    else:
+        # Fallback to CUSTOM_AGENTS if agents.yaml doesn't exist
+        for agent in CUSTOM_AGENTS:
+            pid = str(uuid.uuid4())
+            _persona_store[pid] = PersonaRecord(
+                persona_id=pid,
+                name=agent["name"],
+                mode="prebuilt",
+                system_prompt=agent.get("system_prompt", ""),
+                model=agent.get("model") or DEFAULT_MODEL,
+                description=agent.get("role", ""),
+                owner_id=owner_id,
+                created_at=now,
+                updated_at=now,
+                is_prebuilt=True,
+                is_active=True,
+                source="custom",
+            )
 
     # Seed from canned personalities
-    from council.features.personalities import CANNED_PERSONALITIES
-
     for canned in CANNED_PERSONALITIES:
         pid = str(uuid.uuid4())
         _persona_store[pid] = PersonaRecord(
