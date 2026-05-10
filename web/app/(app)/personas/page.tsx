@@ -1197,7 +1197,6 @@ function CouncilConfigPanel() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["personas"] }),
   });
 
-  const [localAgents, setLocalAgents] = useState<number | null>(null);
   const [localRounds, setLocalRounds] = useState<number | null>(null);
   const [modelDrafts, setModelDrafts] = useState<Record<string, string>>({});
 
@@ -1214,9 +1213,7 @@ function CouncilConfigPanel() {
     });
   }, [personas.data]);
 
-  const numAgents = localAgents ?? config.data?.num_agents ?? 6;
   const numRounds = localRounds ?? config.data?.num_rounds ?? 4;
-  const maxAgents = config.data?.limits?.max_agents ?? 20;
   const maxRounds = config.data?.limits?.max_rounds ?? 12;
   const selectedIds = config.data?.selected_persona_ids ?? [];
 
@@ -1234,10 +1231,8 @@ function CouncilConfigPanel() {
 
   function saveSettings() {
     updateConfig.mutate({
-      num_agents: localAgents ?? numAgents,
       num_rounds: localRounds ?? numRounds,
     });
-    setLocalAgents(null);
     setLocalRounds(null);
   }
 
@@ -1254,19 +1249,7 @@ function CouncilConfigPanel() {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-1.5">
-            <Label>
-              Number of agents (2-{maxAgents})
-            </Label>
-            <Input
-              type="number"
-              min={2}
-              max={maxAgents}
-              value={numAgents}
-              onChange={(e) => setLocalAgents(parseInt(e.target.value) || 2)}
-            />
-          </div>
+        <div className="grid grid-cols-1 gap-4">
           <div className="space-y-1.5">
             <Label>
               Number of rounds (1-{maxRounds})
@@ -1281,7 +1264,7 @@ function CouncilConfigPanel() {
           </div>
         </div>
 
-        {(localAgents !== null || localRounds !== null) && (
+        {localRounds !== null && (
           <Button size="sm" onClick={saveSettings} disabled={updateConfig.isPending}>
             {updateConfig.isPending ? "Saving..." : "Save settings"}
           </Button>

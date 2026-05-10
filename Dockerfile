@@ -7,7 +7,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# System deps for psycopg / asyncpg / cryptography
+# System deps for asyncpg (PostgreSQL), aiosqlite (SQLite), and cryptography
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \

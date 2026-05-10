@@ -37,6 +37,7 @@ import re
 import sys
 import textwrap
 import time
+import uuid
 from typing import Any, cast
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Sequence
@@ -201,7 +202,9 @@ def _dicts_to_agents(agent_dicts: list[dict]) -> list[Agent]:
                     job_role = jr
                     break
 
-        system_prompt = textwrap.dedent(a["system_prompt"]).strip()
+        # Use safe .get() with defaults. PersonaRecord objects (from API) use "description" instead of "role"
+        # so we map both to support all agent dict sources (YAML, API snapshots, generated).
+        system_prompt = textwrap.dedent(a.get("system_prompt", "")).strip()
 
         # Inject job-role instructions if a role is assigned and not already present
         # (avoids duplication when generate_mbti_personality already injected it)
@@ -211,8 +214,8 @@ def _dicts_to_agents(agent_dicts: list[dict]) -> list[Agent]:
                 system_prompt = system_prompt + "\n\n" + role_instruction
 
         agents.append(Agent(
-            name=a["name"],
-            role=a["role"],
+            name=a.get("name", f"Agent-{uuid.uuid4().hex[:8]}"),
+            role=a.get("role", a.get("description", "")),
             system_prompt=system_prompt,
             color=a.get("color", "cyan"),
             model=a.get("model"),
@@ -316,9 +319,17 @@ def _get_xai_client() -> AsyncOpenAI:
 def get_client_for_model(model: str) -> tuple[AsyncOpenAI, str]:
     """Return (client, resolved_model) for the given model. Uses XAI API when available for Grok models."""
     model = (model or MODEL).split(":")[0]
+    # Prefer native XAI API for known Grok models when XAI_API_KEY is set
     if model in XAI_MODEL_MAP and os.getenv("XAI_API_KEY"):
         return _get_xai_client(), XAI_MODEL_MAP[model]
-    return _get_openrouter_client(), model
+
+    # Fallback to OpenRouter. If this is a Grok model (present in XAI_MODEL_MAP)
+    # ensure OpenRouter-style provider prefix `x-ai/` is present so OpenRouter
+    # routes the request to the correct backend.
+    resolved = model
+    if model in XAI_MODEL_MAP and not resolved.startswith("x-ai/"):
+        resolved = f"x-ai/{resolved}"
+    return _get_openrouter_client(), resolved
 
 
 def load_generated_people(path: Path) -> list[dict]:

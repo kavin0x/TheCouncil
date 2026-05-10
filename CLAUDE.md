@@ -112,6 +112,9 @@ GET    /me/personas/{id}              Get a single persona
 PUT    /me/personas/{id}              Update a persona
 DELETE /me/personas/{id}             Delete a persona
 POST   /me/personas/questionnaire     Generate a persona via LLM from structured questionnaire
+POST   /me/api-keys                   Create a new API key for programmatic access
+GET    /me/api-keys                   List all API keys for the authenticated user
+DELETE /me/api-keys/{key_id}         Revoke (disable) an API key
 GET    /me/config                     Get per-user council run configuration
 PUT    /me/config                     Update council run configuration (agents, rounds, model)
 POST   /webhooks/zoom                 Zoom webhook receiver (posts artifact to chat on meeting.ended)
@@ -207,8 +210,9 @@ XAI_API_KEY=...                 # Optional: native Grok API (cheaper for grok-* 
 API_SECRET_KEY=...              # Dev bearer token (min 32 chars in production)
 CORS_ORIGINS=http://localhost:3000  # Comma-separated allowed CORS origins (no wildcard)
 
-# Infrastructure
-DATABASE_URL=postgresql+asyncpg://council:council@localhost:5432/council
+# Infrastructure — Database (supports both SQLite and PostgreSQL)
+DATABASE_URL=sqlite+aiosqlite:///./council.db  # SQLite (default, no setup required)
+# DATABASE_URL=postgresql+asyncpg://council:council@localhost:5432/council  # PostgreSQL alternative
 REDIS_URL=redis://localhost:6379/0
 CELERY_BROKER_URL=redis://localhost:6379/1
 CELERY_RESULT_BACKEND=redis://localhost:6379/1

@@ -21,10 +21,10 @@ from sqlalchemy import (
     Column,
     Float,
     ForeignKey,
+    JSON,
     String,
     Text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
 from council.db.session import Base
@@ -79,13 +79,14 @@ class Deliberation(Base):
     """A single multi-agent council deliberation run."""
 
     __tablename__ = "deliberations"
+    __allow_unmapped__ = True
 
     id: str = Column(String(36), primary_key=True, default=_uuid)
     owner_id: str = Column(String(255), nullable=False, index=True)
     question: str = Column(Text, nullable=False)
     status: str = Column(String(32), nullable=False, default="pending", index=True)
-    config: dict[str, Any] = Column(JSONB, nullable=False, default=dict)
-    result: dict[str, Any] | None = Column(JSONB, nullable=True)
+    config: dict[str, Any] = Column(JSON, nullable=False, default=dict)
+    result: dict[str, Any] | None = Column(JSON, nullable=True)
     error: str | None = Column(Text, nullable=True)
     created_at: float = Column(Float, nullable=False, default=_now)
     started_at: float | None = Column(Float, nullable=True)
@@ -123,6 +124,7 @@ class Persona(Base):
     """A saved agent persona owned by a user."""
 
     __tablename__ = "personas"
+    __allow_unmapped__ = True
 
     id: str = Column(String(36), primary_key=True, default=_uuid)
     owner_id: str = Column(String(255), nullable=False, index=True)
@@ -160,6 +162,7 @@ class Artifact(Base):
     """Structured deliberation artifact synthesised from a completed run."""
 
     __tablename__ = "artifacts"
+    __allow_unmapped__ = True
 
     id: str = Column(String(36), primary_key=True, default=_uuid)
     deliberation_id: str = Column(
@@ -171,11 +174,11 @@ class Artifact(Base):
     # Structured content
     decision_rationale: str = Column(Text, nullable=False, default="")
     recommended_action: str = Column(Text, nullable=False, default="")
-    dissenting_opinions: list[dict[str, Any]] = Column(JSONB, nullable=False, default=list)
+    dissenting_opinions: list[dict[str, Any]] = Column(JSON, nullable=False, default=list)
     consensus_resolution: str = Column(Text, nullable=False, default="")
-    agent_votes: dict[str, Any] = Column(JSONB, nullable=False, default=dict)
-    top3_resolutions: list[dict[str, Any]] = Column(JSONB, nullable=False, default=list)
-    full_result: dict[str, Any] = Column(JSONB, nullable=False, default=dict)
+    agent_votes: dict[str, Any] = Column(JSON, nullable=False, default=dict)
+    top3_resolutions: list[dict[str, Any]] = Column(JSON, nullable=False, default=list)
+    full_result: dict[str, Any] = Column(JSON, nullable=False, default=dict)
 
     format: str = Column(String(32), nullable=False, default="json")  # json | markdown | pdf
     created_at: float = Column(Float, nullable=False, default=_now)
@@ -253,6 +256,7 @@ class UsageEvent(Base):
     """Records a single billable usage event for audit and billing."""
 
     __tablename__ = "usage_events"
+    __allow_unmapped__ = True
 
     id: int = Column(BigInteger, primary_key=True, autoincrement=True)
     deliberation_id: str = Column(
@@ -261,7 +265,7 @@ class UsageEvent(Base):
     owner_id: str = Column(String(255), nullable=False, index=True)
     event_type: str = Column(String(64), nullable=False)  # run_started | run_completed | run_failed
     tier: str = Column(String(32), nullable=False, default="basic")
-    metadata: dict[str, Any] = Column(JSONB, nullable=False, default=dict)
+    event_metadata: dict[str, Any] = Column(JSON, nullable=False, default=dict)
     recorded_at: float = Column(Float, nullable=False, default=_now)
 
     # relationship

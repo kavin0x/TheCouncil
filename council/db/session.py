@@ -2,10 +2,14 @@
 Async SQLAlchemy session and engine for TheCouncil.
 
 Environment variable:
-  DATABASE_URL — asyncpg connection string (e.g. postgresql+asyncpg://...)
+  DATABASE_URL — database connection string
+    - PostgreSQL: postgresql+asyncpg://user:password@host:port/database
+    - SQLite: sqlite+aiosqlite:///path/to/database.db
+
+Default: SQLite database at ./council.db
 
 Falls back gracefully so tests (which mock the DB layer) can import without
-a real Postgres instance.
+a real database instance.
 """
 
 from __future__ import annotations
@@ -25,7 +29,8 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import DeclarativeBase
 
-DATABASE_URL = os.getenv("DATABASE_URL", "")
+# Default to SQLite; can be overridden with DATABASE_URL environment variable
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./council.db")
 
 
 class Base(DeclarativeBase):
@@ -35,13 +40,27 @@ class Base(DeclarativeBase):
 def _make_engine_and_session(url: str):  # type: ignore[return]
     if not url:
         return None, None
-    engine = create_async_engine(
-        url,
-        pool_pre_ping=True,
-        pool_size=5,
-        max_overflow=10,
-        echo=os.getenv("SQLALCHEMY_ECHO", "").lower() in ("1", "true"),
-    )
+    
+    # SQLite-specific configuration
+    is_sqlite = "sqlite" in url
+    
+    if is_sqlite:
+        # SQLite doesn't support the same pool features as PostgreSQL
+        engine = create_async_engine(
+            url,
+            echo=os.getenv("SQLALCHEMY_ECHO", "").lower() in ("1", "true"),
+            connect_args={"timeout": 15},  # Connection timeout
+        )
+    else:
+        # PostgreSQL and other databases with connection pooling
+        engine = create_async_engine(
+            url,
+            pool_pre_ping=True,
+            pool_size=5,
+            max_overflow=10,
+            echo=os.getenv("SQLALCHEMY_ECHO", "").lower() in ("1", "true"),
+        )
+    
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     return engine, session_factory
 
@@ -58,8 +77,8 @@ async def get_session_dep() -> AsyncGenerator[AsyncSession, None]:
     """FastAPI dependency that yields a database session."""
     if _session_factory is None:
         raise RuntimeError(
-            "DATABASE_URL is not configured. "
-            "Set it in .env or the environment before starting the server."
+            "Database not configured. "
+            "Set DATABASE_URL in the environment or ensure the default SQLite database can be created."
         )
     async with _session_factory() as session:
         yield session
@@ -74,8 +93,8 @@ async def get_session_ctx():
     """Async context manager for a database session (for use outside FastAPI dependency injection)."""
     if _session_factory is None:
         raise RuntimeError(
-            "DATABASE_URL is not configured. "
-            "Set it in .env or the environment before starting the server."
+            "Database not configured. "
+            "Set DATABASE_URL in the environment or ensure the default SQLite database can be created."
         )
     async with _session_factory() as session:
         yield session

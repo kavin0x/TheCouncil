@@ -12,12 +12,15 @@ Endpoints:
   GET  /me/personas/{id}   Get a single persona
   PUT  /me/personas/{id}   Update a persona
   DELETE /me/personas/{id} Delete a persona
+  POST /me/api-keys        Create a new API key
+  GET  /me/api-keys        List all API keys
+  DELETE /me/api-keys/{id} Revoke an API key
   POST /api/legal/accept   Record ToS acceptance (version + timestamp)
   GET  /api/legal/status   Check whether current ToS has been accepted
 
 Auth:
   Bearer token in the Authorization header.
-  Token is validated against the API_SECRET_KEY environment variable
+  Token is validated against the API_SECRET_KEY environment variable or stored API keys in the database
   for single-key dev mode, or against a user table in production.
 
 Usage (dev):
@@ -73,9 +76,28 @@ from council.features.sandbox import (  # noqa: E402
     kill_desktop_sandbox,
     run_sandbox_task,
 )
-from council.db.session import get_engine, get_session_ctx
+from council.db.session import get_engine, get_session_ctx, get_session_dep
+from council.db.models import ApiKey, User, Deliberation, Persona as PersonaModel
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# API Key utility functions
+# ---------------------------------------------------------------------------
+
+
+def _hash_api_key(key: str) -> str:
+    """Hash an API key using SHA256."""
+    return hashlib.sha256(key.encode()).hexdigest()
+
+
+def _generate_api_key() -> str:
+    """Generate a new API key with format: tc_live_<random_chars>."""
+    random_suffix = base64.urlsafe_b64encode(os.urandom(16)).decode().rstrip("=")
+    return f"tc_live_{random_suffix}"
 
 
 def _validate_environment() -> None:
@@ -449,15 +471,48 @@ AuthContext = AuthenticatedUser
 
 async def get_current_user(
     authorization: Annotated[str | None, Header()] = None,
+    session: Annotated[AsyncSession | None, Depends(get_session_dep)] = None,
 ) -> AuthenticatedUser:
-    """Return the authenticated user. Optionally enforces API_SECRET_KEY if set."""
+    """Return the authenticated user. Supports API_SECRET_KEY env var or stored API keys."""
     api_secret = os.getenv("API_SECRET_KEY", "")
-    if api_secret:
-        token = ""
-        if authorization and authorization.lower().startswith("bearer "):
-            token = authorization[7:].strip()
-        if not hmac.compare_digest(token.encode(), api_secret.encode()):
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    token = ""
+    
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization[7:].strip()
+    
+    # First try API_SECRET_KEY environment variable (dev mode)
+    if api_secret and token:
+        if hmac.compare_digest(token.encode(), api_secret.encode()):
+            return AuthenticatedUser(user_id="local", auth_method="api_secret")
+    
+    # Then try stored API keys in database
+    if token and session:
+        try:
+            key_hash = _hash_api_key(token)
+            # Use text query to avoid type checking issues
+            from sqlalchemy import text
+            result = await session.execute(
+                text("SELECT owner_id, key_prefix FROM api_keys WHERE key_hash = :hash AND is_active = 1"),
+                {"hash": key_hash}
+            )
+            row = result.first()
+            if row:
+                owner_id, key_prefix = row
+                # Update last_used_at
+                await session.execute(
+                    text("UPDATE api_keys SET last_used_at = :now WHERE key_hash = :hash"),
+                    {"now": time.time(), "hash": key_hash}
+                )
+                await session.commit()
+                return AuthenticatedUser(user_id=owner_id, auth_method="api_key")
+        except Exception:
+            pass  # Fall through to error
+    
+    # If we require auth and don't have valid credentials, fail
+    if api_secret or token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    
+    # Allow unauthenticated access if no API_SECRET_KEY is set
     return AuthenticatedUser(user_id="local", auth_method="none")
 
 
@@ -915,9 +970,32 @@ class CouncilConfigRequest(BaseModel):
     model: str | None = None
 
 
+class CreateApiKeyRequest(BaseModel):
+    """Request to create a new API key."""
+    name: str = Field(default="My API Key", max_length=100, description="Human-readable name for this key")
+
+
+class ApiKeyResponse(BaseModel):
+    """Response containing API key metadata (never includes plaintext key)."""
+    key_id: str
+    name: str
+    key_prefix: str
+    created_at: float
+    last_used_at: float | None
+    is_active: bool
+
+
+class ApiKeyCreatedResponse(ApiKeyResponse):
+    """Response when creating a new API key (includes the plaintext key once)."""
+    plaintext_key: str = Field(..., description="The actual API key - only shown once!")
+
+
 def _persona_snapshot_for_run(persona: PersonaRecord) -> dict[str, Any]:
     data = persona.model_dump(exclude={"owner_id"})
     data["model"] = data.get("model") or DEFAULT_MODEL
+    # Map PersonaRecord.description to "role" for agent dict compatibility
+    # _dicts_to_agents() expects "role" field; PersonaRecord uses "description"
+    data["role"] = data.pop("description", "")
     return data
 
 
@@ -1148,6 +1226,134 @@ async def update_council_config(
 # ---------------------------------------------------------------------------
 # API Key management
 # ---------------------------------------------------------------------------
+
+
+@app.post(
+    "/me/api-keys",
+    response_model=ApiKeyCreatedResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a new API key",
+)
+async def create_api_key(
+    body: CreateApiKeyRequest,
+    auth: Annotated[AuthContext, Depends(require_auth)],
+    session: Annotated[AsyncSession, Depends(get_session_dep)],
+) -> ApiKeyCreatedResponse:
+    """Create a new API key for programmatic access.
+    
+    The plaintext key is returned ONLY in this response. Store it securely.
+    """
+    # Ensure user exists in database
+    from sqlalchemy import text
+    
+    owner_id = auth.owner_id
+    
+    # Check if user exists, create if not
+    result = await session.execute(text("SELECT id FROM users WHERE id = :id"), {"id": owner_id})
+    if not result.first():
+        await session.execute(
+            text("INSERT INTO users (id, email, tier, created_at) VALUES (:id, :email, :tier, :created_at)"),
+            {"id": owner_id, "email": f"{owner_id}@council.local", "tier": "basic", "created_at": time.time()}
+        )
+        await session.commit()
+    
+    # Generate new API key
+    plaintext_key = _generate_api_key()
+    key_hash = _hash_api_key(plaintext_key)
+    key_prefix = plaintext_key[:12]
+    key_id = str(uuid.uuid4())
+    now = time.time()
+    
+    # Store in database
+    await session.execute(
+        text("""
+            INSERT INTO api_keys (id, owner_id, name, key_hash, key_prefix, created_at, last_used_at, is_active)
+            VALUES (:id, :owner_id, :name, :key_hash, :key_prefix, :created_at, :last_used_at, :is_active)
+        """),
+        {
+            "id": key_id,
+            "owner_id": owner_id,
+            "name": body.name,
+            "key_hash": key_hash,
+            "key_prefix": key_prefix,
+            "created_at": now,
+            "last_used_at": None,
+            "is_active": 1,
+        }
+    )
+    await session.commit()
+    
+    return ApiKeyCreatedResponse(
+        key_id=key_id,
+        name=body.name,
+        key_prefix=key_prefix,
+        created_at=now,
+        last_used_at=None,
+        is_active=True,
+        plaintext_key=plaintext_key,
+    )
+
+
+@app.get(
+    "/me/api-keys",
+    response_model=list[ApiKeyResponse],
+    summary="List all API keys for the current user",
+)
+async def list_api_keys(
+    auth: Annotated[AuthContext, Depends(require_auth)],
+    session: Annotated[AsyncSession, Depends(get_session_dep)],
+) -> list[ApiKeyResponse]:
+    """List all API keys for the authenticated user."""
+    from sqlalchemy import text
+    
+    result = await session.execute(
+        text("SELECT id, name, key_prefix, created_at, last_used_at, is_active FROM api_keys WHERE owner_id = :owner_id ORDER BY created_at DESC"),
+        {"owner_id": auth.owner_id}
+    )
+    
+    keys = []
+    for row in result.all():
+        key_id, name, key_prefix, created_at, last_used_at, is_active = row
+        keys.append(ApiKeyResponse(
+            key_id=key_id,
+            name=name,
+            key_prefix=key_prefix,
+            created_at=created_at,
+            last_used_at=last_used_at,
+            is_active=bool(is_active),
+        ))
+    
+    return keys
+
+
+@app.delete(
+    "/me/api-keys/{key_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Revoke an API key",
+)
+async def revoke_api_key(
+    key_id: str,
+    auth: Annotated[AuthContext, Depends(require_auth)],
+    session: Annotated[AsyncSession, Depends(get_session_dep)],
+) -> None:
+    """Revoke (disable) an API key by marking it as inactive."""
+    from sqlalchemy import text
+    
+    # First verify the key belongs to this user
+    result = await session.execute(
+        text("SELECT id FROM api_keys WHERE id = :id AND owner_id = :owner_id"),
+        {"id": key_id, "owner_id": auth.owner_id}
+    )
+    
+    if not result.first():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API key not found")
+    
+    # Mark as inactive
+    await session.execute(
+        text("UPDATE api_keys SET is_active = 0 WHERE id = :id"),
+        {"id": key_id}
+    )
+    await session.commit()
 
 
 # ---------------------------------------------------------------------------

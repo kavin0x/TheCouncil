@@ -68,8 +68,10 @@ Copy `.env.example` to `.env` and populate these required variables:
 
 - `OPENROUTER_API_KEY` — LLM provider (OpenRouter; required)
 - `API_SECRET_KEY` — Bearer token for API auth (min 32 chars in production)
-- `DATABASE_URL` — PostgreSQL connection string
-- `REDIS_URL` — Redis connection for pub/sub and job queue
+- `DATABASE_URL` — Database connection string (default: `sqlite+aiosqlite:///./council.db`)
+  - **SQLite** (default): `sqlite+aiosqlite:///./council.db` — local file-based database
+  - **PostgreSQL**: `postgresql+asyncpg://user:password@host:5432/database`
+- `REDIS_URL` — Redis connection for pub/sub and job queue (required for worker mode)
 
 Optional integrations:
 
@@ -88,6 +90,16 @@ Behavior flags:
 Frontend (`web/.env.local`):
 
 - `NEXT_PUBLIC_API_TOKEN` — Same value as `API_SECRET_KEY`; required if the backend enforces auth
+
+**API Key Management:**
+
+Users can generate API keys via the `/me/api-keys` endpoints for programmatic access:
+
+- `POST /me/api-keys` — Create a new API key
+- `GET /me/api-keys` — List all API keys
+- `DELETE /me/api-keys/{key_id}` — Revoke an API key
+
+Keys are stored securely as SHA256 hashes in the database and can be used as Bearer tokens.
 
 ## Testing
 
