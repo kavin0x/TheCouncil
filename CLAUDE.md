@@ -117,7 +117,6 @@ GET    /me/api-keys                   List all API keys for the authenticated us
 DELETE /me/api-keys/{key_id}         Revoke (disable) an API key
 GET    /me/config                     Get per-user council run configuration
 PUT    /me/config                     Update council run configuration (agents, rounds, model)
-POST   /webhooks/zoom                 Zoom webhook receiver (posts artifact to chat on meeting.ended)
 POST   /internal/run-events           Worker→API event bridge (used when COUNCIL_API_EVENT_BRIDGE_URL is set)
 GET    /health                        Health check (not in schema)
 GET    /readiness                     Readiness check with DATABASE_URL presence validation
@@ -154,15 +153,6 @@ Two sandbox modes, both Docker-based:
 
 Enable via `computer_use_enabled=true` on a run; requires Docker daemon.
 
-### Zoom Webhook Integration
-
-`POST /webhooks/zoom` handles Zoom events:
-
-- `endpoint.url_validation` — responds to Zoom's URL validation challenge
-- `meeting.ended` — extracts a council `run_id` from the meeting topic (format: `[council:<run_id>:<hmac_token>]`) and posts the markdown artifact to the meeting's chat channel
-
-Requires `ZOOM_WEBHOOK_SECRET_TOKEN` (signature verification), `ZOOM_RUN_SECRET` (HMAC-SHA256 token in meeting topic), and `ZOOM_API_TOKEN` (posting to chat).
-
 ### Web App (`web/`)
 
 Next.js 16 with React 19, Tailwind CSS 4, TanStack Query, and Radix UI. Uses App Router (`web/app/`). API client and TypeScript types are in `web/lib/api.ts`.
@@ -180,7 +170,7 @@ App routes (all under `web/app/(app)/`):
 - `/runs/[id]` — run detail with live WebSocket feed (`runs/[id]/page.tsx`)
 - `/personas` — persona management (`personas/page.tsx`)
 - `/settings` — council settings: agents, rounds, model (`settings/page.tsx`)
-- `/integrations` — Zoom and MCP integration config (`integrations/page.tsx`)
+- `/integrations` — MCP integration config (`integrations/page.tsx`)
 - `/usage` — month-to-date usage (`usage/page.tsx`)
 
 **Authentication:** No login screen. All routes are public. `web/lib/auth.tsx` exports `useAuth()` which reads `NEXT_PUBLIC_API_TOKEN` (the same value as `API_SECRET_KEY`) for API calls. Set `NEXT_PUBLIC_API_TOKEN` in `web/.env.local` if the backend `API_SECRET_KEY` is configured.
@@ -223,9 +213,6 @@ NEXT_PUBLIC_API_TOKEN=...       # Same as API_SECRET_KEY; set in web/.env.local
 
 # Optional integrations
 TAVILY_API_KEY=...              # Web search capability
-ZOOM_WEBHOOK_SECRET_TOKEN=...   # Zoom webhook signature verification
-ZOOM_RUN_SECRET=...             # HMAC secret for run_id in Zoom meeting topics
-ZOOM_API_TOKEN=...              # Zoom API Bearer token for posting to chat
 
 # Behavior flags
 COUNCIL_DISABLE_WORKER=0        # 1 = run Celery in-process (dev/test)

@@ -37,3 +37,6 @@ sessions/
 
 # Local assets / photos
 photos/
+
+# gstack security reports and local AI tooling data
+.gstack/
