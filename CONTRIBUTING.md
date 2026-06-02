@@ -124,6 +124,8 @@ Use descriptive branch names:
 
 Write clear, descriptive commit messages:
 
+Follow the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) specification.
+
 ```text
 Short summary (50 chars or less)
 
@@ -132,6 +134,18 @@ Include the problem being solved and how your change addresses it.
 
 - Use bullet points for multiple changes
 - Reference issues like "Fixes #123"
+```
+
+### Conventional Commits
+
+Use the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) format for all commit messages.
+
+Examples:
+
+```text
+feat(api): add run status endpoint
+fix(web): handle null response in dashboard
+docs(contributing): add commit message guidelines
 ```
 
 ### Pull Request Process
