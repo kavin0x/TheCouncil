@@ -17,17 +17,17 @@ A multi-agent AI deliberation platform that orchestrates structured debates betw
 
 ## Repository Layout
 
-| Path                                  | Purpose                                                                 |
-| ------------------------------------- | ----------------------------------------------------------------------- |
-| `council/api/`                      | FastAPI REST API & WebSocket server                                     |
-| `council/core/`                     | Debate orchestration engine                                             |
-| `council/features/`                 | Sandbox, search, content guardrails                                     |
-| `council/db/`                       | Database models & migrations                                            |
-| `council/worker/`                   | Celery task queue integration                                           |
-| `council/features/personalities.py` | Default built-in agent definitions (canned personas) and MBTI generator |
-| `web/`                              | Next.js 16 UI dashboard                                                 |
-| `tests/`                            | `pytest` backend suite                                                |
-| `docker-compose.yml`                | Full-stack local development                                            |
+| Path                                 | Purpose                                                                 |
+| ------------------------------------ | ----------------------------------------------------------------------- |
+| `council/api/`                       | FastAPI REST API & WebSocket server                                     |
+| `council/core/`                      | Debate orchestration engine                                             |
+| `council/features/`                  | Sandbox, search, content guardrails                                     |
+| `council/db/`                        | Database models & migrations                                            |
+| `council/worker/`                    | Celery task queue integration                                           |
+| `council/features/personalities.py`  | Default built-in agent definitions (canned personas) and MBTI generator |
+| `web/`                               | Next.js 16 UI dashboard                                                 |
+| `tests/`                             | `pytest` backend suite                                                  |
+| `docker-compose.yml`                 | Full-stack local development                                            |
 
 ## Quick Start
 
