@@ -5,6 +5,7 @@ Quick integration test for API key functionality
 import asyncio
 import os
 import sys
+import traceback
 
 # Unset DATABASE_URL to use the .env file
 if 'DATABASE_URL' in os.environ:
@@ -35,16 +36,15 @@ async def main():
         print(f"✅ API Keys table: Found {len(keys)} keys in database")
         
         for key in keys:
-                                                           tive: {key.is_active}")
+            print(f"- id: {key.id} name: {key.name} created_by: {key.created_by} active: {key.is_active}")
         
         return True
 
 
 if __name__ == "__main__":
     try:
-         uccess = asyncio.run(main())
+        success = asyncio.run(main())
         sys.exit(0 if success else 1)
-    except Exception as e:
-        print        print        print       t traceback
+    except Exception:
         traceback.print_exc()
         sys.exit(1)

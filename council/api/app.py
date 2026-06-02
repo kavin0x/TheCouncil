@@ -176,6 +176,10 @@ class _MCPAuthMiddleware:
     def __init__(self, app: Any) -> None:
         self._app = app
 
+    @property
+    def lifespan(self) -> Any:
+        return self._app.lifespan
+
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope["type"] not in ("http", "websocket"):
             await self._app(scope, receive, send)
