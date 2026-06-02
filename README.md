@@ -11,7 +11,6 @@ A multi-agent AI deliberation platform that orchestrates structured debates betw
 - **Web Search**: Integrate external knowledge via Tavily API during deliberation
 - **Real-time Events**: WebSocket streams for live debate progress; falls back to in-process broadcast when Redis is unavailable
 - **MCP Integration**: Control TheCouncil from your IDE (Cursor, Claude Desktop) via the built-in FastMCP server at `/mcp`
-- **Zoom Integration**: Webhook receiver posts artifact summaries to Zoom chat when a meeting ends
 - **REST API**: Full HTTP API for programmatic access
 - **Self-Hosted**: Deploy on your own infrastructure with Docker or bare metal; no usage limits on the open-source tier
 
@@ -78,7 +77,6 @@ Optional integrations:
 
 - `TAVILY_API_KEY` — Enable web search in debates
 - `XAI_API_KEY` — Use native Grok API
-- `ZOOM_WEBHOOK_SECRET_TOKEN` / `ZOOM_RUN_SECRET` / `ZOOM_API_TOKEN` — Zoom chat integration
 
 Behavior flags:
 
