@@ -43,7 +43,7 @@ Running `python -m pytest tests/` fails with ImportError
 
 ### Feature Requests
 
-Describe the feature, why you need it, and any alternatives you've considered.
+Describe the feature, why you need it, and if possible, see if there is: already a similar feature request or pull request for your feature!
 
 ## Development Setup
 
