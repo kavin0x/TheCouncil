@@ -27,7 +27,10 @@ logger = logging.getLogger(__name__)
 _ALLOWED_SANDBOX_COMMANDS = frozenset({
     "python", "python3", "node", "bash", "sh", "echo", "cat", "ls", "pwd",
     "env", "printenv", "uname", "whoami", "date", "which", "head", "tail",
-    "wc", "sort", "uniq", "grep", "find", "curl", "wget", "pip", "pip3",
+    "wc", "sort", "uniq", "grep", "find", "pip", "pip3",
+    # curl and wget intentionally excluded: containers run with network_mode="none",
+    # making network tools non-functional. Removing them also eliminates the SSRF
+    # attack surface (VULN-04) should network isolation ever be relaxed.
     "npm", "npx", "java", "javac", "go", "ruby", "perl", "r",
 })
 
@@ -173,6 +176,8 @@ async def run_sandbox_task(*, question: str, config: dict[str, Any] | None = Non
             cmd,
             remove=True,
             timeout=timeout_s,
+            network_mode="none",           # block all outbound network access (SSRF prevention)
+            security_opt=["no-new-privileges:true"],  # prevent privilege escalation
         )
         stdout = result.decode() if isinstance(result, bytes) else str(result)
         stderr = ""

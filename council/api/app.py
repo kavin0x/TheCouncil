@@ -135,6 +135,16 @@ def _mcp_owner_id(api_key: str | None = None) -> str:
 @asynccontextmanager
 async def _lifespan(app: FastAPI):  # type: ignore[type-arg]
     global _worker_task
+    if not os.getenv("API_SECRET_KEY", ""):
+        logger.warning(
+            "API_SECRET_KEY is not set. The server is running without authentication — "
+            "all endpoints are publicly accessible. Set API_SECRET_KEY in production."
+        )
+        if not os.getenv("COUNCIL_ALLOW_NO_AUTH", ""):
+            logger.warning(
+                "Set COUNCIL_ALLOW_NO_AUTH=1 to suppress this warning if unauthenticated "
+                "access is intentional (e.g. local development)."
+            )
     if not os.getenv("COUNCIL_DISABLE_WORKER", ""):
         if _worker_task is None or _worker_task.done():
             _worker_task = asyncio.create_task(_run_worker_loop())
@@ -153,6 +163,57 @@ if hasattr(_mcp, "http_app"):
 else:
     streamable_http_app = getattr(_mcp, "streamable_http_app")
     _mcp_app = streamable_http_app()
+
+
+class _MCPAuthMiddleware:
+    """ASGI middleware that enforces bearer-token auth on the MCP sub-app.
+
+    When API_SECRET_KEY is set, every request must carry a valid
+    ``Authorization: Bearer <token>`` header.  If the key is unset the
+    middleware is a pass-through (zero-config dev/test behaviour).
+    """
+
+    def __init__(self, app: Any) -> None:
+        self._app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] not in ("http", "websocket"):
+            await self._app(scope, receive, send)
+            return
+
+        secret = os.getenv("API_SECRET_KEY", "").strip()
+        if secret:
+            headers = dict(scope.get("headers", []))
+            auth_header = headers.get(b"authorization", b"").decode("utf-8", errors="replace")
+            token = ""
+            if auth_header.lower().startswith("bearer "):
+                token = auth_header[7:].strip()
+
+            valid = bool(token) and hmac.compare_digest(
+                hashlib.sha256(token.encode()).digest(),
+                hashlib.sha256(secret.encode()).digest(),
+            )
+            if not valid:
+                if scope["type"] == "http":
+                    response_body = b'{"detail":"Unauthorized"}'
+                    await send({
+                        "type": "http.response.start",
+                        "status": 401,
+                        "headers": [
+                            [b"content-type", b"application/json"],
+                            [b"content-length", str(len(response_body)).encode()],
+                            [b"www-authenticate", b"Bearer"],
+                        ],
+                    })
+                    await send({"type": "http.response.body", "body": response_body})
+                else:
+                    await send({"type": "websocket.close", "code": 4401})
+                return
+
+        await self._app(scope, receive, send)
+
+
+_mcp_app = _MCPAuthMiddleware(_mcp_app)
 
 _hide_docs = os.getenv("HIDE_DOCS", "").lower() in ("1", "true", "yes")
 
@@ -1421,6 +1482,12 @@ async def internal_run_events(request: Request) -> JSONResponse:
         token = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
         if not hmac.compare_digest(token.encode(), api_secret.encode()):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+    else:
+        # No API_SECRET_KEY configured — restrict to localhost only to prevent unauthenticated
+        # event injection from external callers.
+        client_host = (request.client.host if request.client else None) or ""
+        if client_host not in ("127.0.0.1", "::1", "localhost"):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
     try:
         body = await request.json()
     except Exception:
@@ -1450,10 +1517,52 @@ async def run_websocket(websocket: WebSocket, run_id: str) -> None:
     """
     token, _ws_use_subprotocol = _extract_websocket_token(websocket)
 
+    # --- Authentication ---
+    api_secret = os.getenv("API_SECRET_KEY", "")
+    auth_method = "none"
+    ws_user_id = "local"
+
+    if api_secret:
+        # API_SECRET_KEY is configured — token must match or be a valid stored key.
+        if token and hmac.compare_digest(token.encode(), api_secret.encode()):
+            auth_method = "api_secret"
+            ws_user_id = "local"
+        else:
+            # Try stored API key
+            authenticated_via_db = False
+            if token:
+                try:
+                    async with get_session_ctx() as _ws_session:
+                        from sqlalchemy import text as _sa_text
+                        key_hash = _hash_api_key(token)
+                        _result = await _ws_session.execute(
+                            _sa_text(
+                                "SELECT owner_id FROM api_keys"
+                                " WHERE key_hash = :hash AND is_active = 1"
+                            ),
+                            {"hash": key_hash},
+                        )
+                        _row = _result.first()
+                        if _row:
+                            ws_user_id = _row[0]
+                            auth_method = "api_key"
+                            authenticated_via_db = True
+                except Exception:
+                    pass
+            if not authenticated_via_db:
+                await websocket.close(code=4001)
+                return
+    # If api_secret is empty, zero-config mode: allow all (auth_method stays "none")
+
     try:
         run = await run_store.get(run_id)
     except RunNotFoundError:
         await websocket.close(code=4004)
+        return
+
+    # --- Ownership check ---
+    if auth_method != "none" and run.owner_id != ws_user_id:
+        await websocket.close(code=4003)
         return
 
     await websocket.accept(subprotocol=token if _ws_use_subprotocol else None)
