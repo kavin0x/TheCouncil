@@ -32,7 +32,7 @@ celery[redis]>=5.4.0
 typer[all]>=0.12.0
 
 # Production-ready enhancements
-alembic>=1.13.0
+alembic>=1.18.4
 slowapi>=0.1.9
 python-multipart>=0.0.6
 structlog>=24.1.0
