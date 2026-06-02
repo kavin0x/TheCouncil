@@ -3,8 +3,9 @@
 A multi-agent AI deliberation platform that orchestrates structured debates between LLM personas. Self-hosted, open-source, and built for extensibility.
 
 ## Features
- - **Multi-Agent Debates**: Orchestrate 5-phase structured deliberations (Independent Takes → Cross-Debate → Private Messages → Resolution)
- - **Flexible Personas**: Use built-in canned personas, generate dynamically from the topic, or build custom personas via an LLM-powered questionnaire
+
+- **Multi-Agent Debates**: Orchestrate 5-phase structured deliberations (Independent Takes → Cross-Debate → Private Messages → Resolution)
+- **Flexible Personas**: Use built-in canned personas, generate dynamically from the topic, or build custom personas via an LLM-powered questionnaire
 - **Deliberation Artifacts**: Structured output (decision rationale, recommended action, dissenting opinions, top-3 resolutions) available as JSON or Markdown
 - **Sandbox Execution**: Run code in Docker containers or stream a live VNC desktop for computer-use workflows
 - **Web Search**: Integrate external knowledge via Tavily API during deliberation
@@ -16,17 +17,17 @@ A multi-agent AI deliberation platform that orchestrates structured debates betw
 
 ## Repository Layout
 
-| Path                         | Purpose                              |
-| ---------------------------- | ------------------------------------ |
-| `council/api/`               | FastAPI REST API & WebSocket server  |
-| `council/core/`              | Debate orchestration engine          |
-| `council/features/`          | Sandbox, search, content guardrails  |
-| `council/db/`                | Database models & migrations         |
-| `council/worker/`            | Celery task queue integration        |
+| Path                                  | Purpose                                                                 |
+| ------------------------------------- | ----------------------------------------------------------------------- |
+| `council/api/`                      | FastAPI REST API & WebSocket server                                     |
+| `council/core/`                     | Debate orchestration engine                                             |
+| `council/features/`                 | Sandbox, search, content guardrails                                     |
+| `council/db/`                       | Database models & migrations                                            |
+| `council/worker/`                   | Celery task queue integration                                           |
 | `council/features/personalities.py` | Default built-in agent definitions (canned personas) and MBTI generator |
-| `web/`                       | Next.js 16 UI dashboard              |
-| `tests/`                     | `pytest` backend suite               |
-| `docker-compose.yml`         | Full-stack local development         |
+| `web/`                              | Next.js 16 UI dashboard                                                 |
+| `tests/`                            | `pytest` backend suite                                                |
+| `docker-compose.yml`                | Full-stack local development                                            |
 
 ## Quick Start
 
@@ -76,7 +77,7 @@ Copy `.env.example` to `.env` and populate these required variables:
 Optional integrations:
 
 - `TAVILY_API_KEY` — Enable web search in debates
-- `XAI_API_KEY` — Use native Grok API (cheaper for `grok-*` models)
+- `XAI_API_KEY` — Use native Grok API
 - `ZOOM_WEBHOOK_SECRET_TOKEN` / `ZOOM_RUN_SECRET` / `ZOOM_API_TOKEN` — Zoom chat integration
 
 Behavior flags:
