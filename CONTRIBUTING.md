@@ -127,7 +127,7 @@ Write clear, descriptive commit messages:
 Follow the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) specification.
 
 ```text
-Short summary (50 chars or less)
+Short summary
 
 Longer explanation of the change if needed. Wrap at 72 characters.
 Include the problem being solved and how your change addresses it.
