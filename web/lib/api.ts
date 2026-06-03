@@ -127,11 +127,6 @@ export interface CouncilConfig {
   };
 }
 
-export interface Usage {
-  period: string;
-  runs: { used: number; limit?: number | null };
-}
-
 export interface ApiKey {
   key_id: string;
   owner_id: string;
@@ -228,9 +223,6 @@ async function request<T>(
 export const api = {
   getEntitlements: (getToken: () => Promise<string | null>) =>
     request<Entitlements>("/me/entitlements", getToken),
-
-  getUsage: (getToken: () => Promise<string | null>) =>
-    request<Usage>("/me/usage", getToken),
 
   listRuns: (getToken: () => Promise<string | null>) =>
     request<Run[]>("/runs", getToken),

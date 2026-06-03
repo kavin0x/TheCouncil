@@ -121,11 +121,9 @@ export default function RunsPage() {
                           <Download className="h-3.5 w-3.5" />
                         </Button>
                       ) : (
-                        <Link href="/usage" title="Upgrade to export">
-                          <Button size="icon" variant="ghost" disabled>
-                            <Download className="h-3.5 w-3.5 opacity-30" />
-                          </Button>
-                        </Link>
+                        <Button size="icon" variant="ghost" disabled title="Export not available">
+                          <Download className="h-3.5 w-3.5 opacity-30" />
+                        </Button>
                       )
                     )}
                   </div>

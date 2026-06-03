@@ -92,9 +92,7 @@ export default function IntegrationsPage() {
         <p className="mb-6 max-w-sm text-sm text-zinc-400">
           MCP server access and IDE plugin integrations are disabled for this deployment.
         </p>
-        <Link href="/usage">
-          <Button>View feature access</Button>
-        </Link>
+        <Button disabled>View feature access</Button>
       </div>
     );
   }
@@ -257,9 +255,7 @@ ${JSON.stringify(
             <CardDescription>Enable custom MCP registration in deployment settings.</CardDescription>
           </CardHeader>
           <CardContent>
-            <Link href="/usage">
-              <Button variant="outline" size="sm">View feature access</Button>
-            </Link>
+            <Button variant="outline" size="sm" disabled>View feature access</Button>
           </CardContent>
         </Card>
       )}

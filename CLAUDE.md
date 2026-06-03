@@ -171,7 +171,6 @@ App routes (all under `web/app/(app)/`):
 - `/personas` — persona management (`personas/page.tsx`)
 - `/settings` — council settings: agents, rounds, model (`settings/page.tsx`)
 - `/integrations` — MCP integration config (`integrations/page.tsx`)
-- `/usage` — month-to-date usage (`usage/page.tsx`)
 
 **Authentication:** No login screen. All routes are public. `web/lib/auth.tsx` exports `useAuth()` which reads `NEXT_PUBLIC_API_TOKEN` (the same value as `API_SECRET_KEY`) for API calls. Set `NEXT_PUBLIC_API_TOKEN` in `web/.env.local` if the backend `API_SECRET_KEY` is configured.
 

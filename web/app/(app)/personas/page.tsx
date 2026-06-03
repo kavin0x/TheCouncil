@@ -1574,7 +1574,6 @@ function StartRunDialog({ entitlements }: { entitlements?: Entitlements }) {
       }),
     onSuccess: async (run) => {
       qc.invalidateQueries({ queryKey: ["runs"] });
-      qc.invalidateQueries({ queryKey: ["usage"] });
 
       if (computerUseEnabled) {
         try {
@@ -1975,11 +1974,7 @@ export default function PersonasPage() {
 
       {atLimit && (
         <div className="rounded-lg border border-amber-800/40 bg-amber-900/10 px-4 py-3 text-sm text-amber-300">
-            You&apos;ve reached the persona limit for this deployment ({maxPersonas}).{" "}
-          <Link href="/usage" className="underline">
-              Review access
-          </Link>{" "}
-          to save more.
+          You&apos;ve reached the persona limit for this deployment ({maxPersonas}).
         </div>
       )}
 

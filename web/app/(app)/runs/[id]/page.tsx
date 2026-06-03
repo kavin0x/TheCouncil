@@ -497,11 +497,9 @@ export default function RunDetailPage({
             </Button>
           )}
           {r.status === "completed" && !canExport && (
-            <Link href="/usage">
-              <Button size="sm" variant="outline" disabled>
-                Upgrade to export
-              </Button>
-            </Link>
+            <Button size="sm" variant="outline" disabled>
+              Export not available
+            </Button>
           )}
         </div>
       </div>

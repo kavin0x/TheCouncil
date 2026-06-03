@@ -8,7 +8,6 @@ import {
   Key,
   Play,
   Puzzle,
-  BarChart3,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth";
@@ -20,7 +19,6 @@ const navItems = [
   { href: "/dashboard",    label: "Dashboard",       icon: Gauge },
   { href: "/runs",         label: "Runs",            icon: Play },
   { href: "/personas",     label: "Personas",        icon: Bot },
-  { href: "/usage",        label: "Usage",           icon: BarChart3 },
   { href: "/settings",     label: "Settings",        icon: Key },
   { href: "/integrations", label: "Integrations",    icon: Puzzle },
 ];
