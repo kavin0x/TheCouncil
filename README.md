@@ -1,5 +1,7 @@
 # TheCouncil
 
+> Built at the [NEBULA:FOG:PROTOCOL](https://nebulafog.ai/) Hackathon!
+
 A multi-agent AI deliberation platform that orchestrates structured debates between LLM personas. Self-hosted, open-source, and built for extensibility.
 
 ## Features
