@@ -12,7 +12,7 @@ mcp>=1.26.0
 fastmcp>=0.2.0
 
 # Docker support for sandboxing
-docker>=7.0.0
+docker>=7.1.0
 
 # Web search via Tavily (optional)
 tavily-python>=0.7.23
