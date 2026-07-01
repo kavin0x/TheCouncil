@@ -15,7 +15,7 @@ fastmcp>=0.2.0
 docker>=7.1.0
 
 # Web search via Tavily (optional)
-tavily-python>=0.7.23
+tavily-python>=0.7.26
 
 # Database (PostgreSQL async + SQLite)
 asyncpg>=0.29.0
