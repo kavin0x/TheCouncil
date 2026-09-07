@@ -31,7 +31,7 @@
     "tailwind-merge": "^3.5.0"
   },
   "overrides": {
-    "postcss": ">=8.5.10"
+    "postcss": ">=8.5.28"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
