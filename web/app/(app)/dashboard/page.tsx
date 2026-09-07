@@ -6,7 +6,6 @@ import { ArrowRight, Bot, Play, Zap } from "lucide-react";
 import { api, type Entitlements, type Run } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import {
-  Badge,
   Button,
   Card,
   CardContent,
@@ -28,19 +27,6 @@ function useDashboard(getToken: () => Promise<string | null>) {
     select: (data) => data.slice(0, 5),
   });
   return { ent, runs };
-}
-
-function tierBadgeVariant(tier: string) {
-  return (
-    {
-      "open-source": "secondary",
-      trial: "warning",
-      basic: "secondary",
-      pro: "default",
-      ultra: "success",
-      enterprise: "success",
-    } as const
-  )[tier] ?? "secondary";
 }
 
 export default function DashboardPage() {

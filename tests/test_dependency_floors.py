@@ -30,3 +30,17 @@ def test_python_requirement_floors_match_dependabot_bumps() -> None:
         if line.startswith("uvicorn[standard]>=")
     )
     assert uvicorn_line == "uvicorn[standard]>=0.52.4"
+
+    redis_line = next(
+        line.split("#", 1)[0].strip()
+        for line in REQUIREMENTS.splitlines()
+        if line.startswith("redis")
+    )
+    assert redis_line == "redis>=4.5.2,<6.5,!=4.5.5,!=5.0.2"
+
+    celery_line = next(
+        line.split("#", 1)[0].strip()
+        for line in REQUIREMENTS.splitlines()
+        if line.startswith("celery")
+    )
+    assert celery_line == "celery[redis]>=5.6.3"

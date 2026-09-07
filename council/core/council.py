@@ -169,7 +169,7 @@ class DebateSession:
 
 def load_config(config_path: Path) -> tuple[list[Agent], dict]:
     """Load agent configuration from YAML file, with fallback to CUSTOM_AGENTS.
-    
+
     If the YAML file doesn't exist, returns built-in CUSTOM_AGENTS and default settings.
     """
     if not config_path.exists():
@@ -180,7 +180,7 @@ def load_config(config_path: Path) -> tuple[list[Agent], dict]:
             "stream_cross_debate": True,
             "show_dm_indicators": True,
         }
-    
+
     with open(config_path) as f:
         raw = yaml.safe_load(f)
     agents = _dicts_to_agents(raw.get("agents", []))
