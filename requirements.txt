@@ -22,11 +22,13 @@ asyncpg>=0.29.0
 aiosqlite>=0.22.1
 sqlalchemy[asyncio]>=2.0.0
 
-# Cache / message bus (Redis Streams)
-redis[asyncio]>=8.0.0
-
-# Background task orchestration (Celery + Redis broker)
-celery[redis]>=5.4.0
+# Cache / message bus (Redis Streams) + Celery broker.
+# No published celery[redis] extra accepts redis 8 (PyPI, 2026-09-07):
+#   celery 5.4.0 extra: redis!=4.5.5,<6.0.0,>=4.5.2
+#   celery 5.6.3 extra: kombu[redis] → redis!=4.5.5,!=5.0.2,<6.5,>=4.5.2
+# Pin celery[redis] to the 5.6 line and match kombu[redis] 5.6.2.
+celery[redis]>=5.6.3
+redis>=4.5.2,<6.5,!=4.5.5,!=5.0.2
 
 # Typer-based CLI
 typer[all]>=0.12.0

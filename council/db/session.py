@@ -40,10 +40,10 @@ class Base(DeclarativeBase):
 def _make_engine_and_session(url: str):  # type: ignore[return]
     if not url:
         return None, None
-    
+
     # SQLite-specific configuration
     is_sqlite = "sqlite" in url
-    
+
     if is_sqlite:
         # SQLite doesn't support the same pool features as PostgreSQL
         engine = create_async_engine(
@@ -60,7 +60,7 @@ def _make_engine_and_session(url: str):  # type: ignore[return]
             max_overflow=10,
             echo=os.getenv("SQLALCHEMY_ECHO", "").lower() in ("1", "true"),
         )
-    
+
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     return engine, session_factory
 

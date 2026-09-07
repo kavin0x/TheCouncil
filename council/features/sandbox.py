@@ -11,7 +11,6 @@ Both modes are available in self-hosted deployments.
 from __future__ import annotations
 
 import asyncio
-import base64
 import logging
 import os
 import re
@@ -193,7 +192,7 @@ async def run_sandbox_task(*, question: str, config: dict[str, Any] | None = Non
             else:
                 raise
         except Exception:
-            raise SandboxDisabledError(f"Docker command execution failed") from None
+            raise SandboxDisabledError("Docker command execution failed") from None
 
     elapsed_ms = int((time.monotonic() - start) * 1000)
     return {

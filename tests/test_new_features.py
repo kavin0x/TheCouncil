@@ -139,45 +139,12 @@ class TestArtifactEndpoint:
 
 class TestZoomWebhook:
     @pytest.mark.asyncio
-    async def test_url_validation_challenge_no_secret(self, client, monkeypatch):
-        monkeypatch.delenv("ZOOM_WEBHOOK_SECRET_TOKEN", raising=False)
-        payload = {
-            "event": "endpoint.url_validation",
-            "payload": {"plainToken": "abc123"},
-        }
-        resp = await client.post("/webhooks/zoom", json=payload)
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["plainToken"] == "abc123"
-        assert "encryptedToken" in data
-
-    @pytest.mark.asyncio
-    async def test_unknown_event_accepted(self, client, monkeypatch):
-        monkeypatch.delenv("ZOOM_WEBHOOK_SECRET_TOKEN", raising=False)
-        payload = {"event": "meeting.created", "payload": {}}
-        resp = await client.post("/webhooks/zoom", json=payload)
-        assert resp.status_code == 200
-        assert resp.json() == {"received": True}
-
-    @pytest.mark.asyncio
-    async def test_invalid_json_returns_400(self, client, monkeypatch):
-        monkeypatch.delenv("ZOOM_WEBHOOK_SECRET_TOKEN", raising=False)
+    async def test_zoom_webhook_route_is_not_mounted(self, client):
         resp = await client.post(
             "/webhooks/zoom",
-            content=b"not-json",
-            headers={"Content-Type": "application/json"},
+            json={"event": "endpoint.url_validation", "payload": {"plainToken": "abc123"}},
         )
-        assert resp.status_code == 400
-
-    @pytest.mark.asyncio
-    async def test_invalid_utf8_returns_400(self, client, monkeypatch):
-        monkeypatch.delenv("ZOOM_WEBHOOK_SECRET_TOKEN", raising=False)
-        resp = await client.post(
-            "/webhooks/zoom",
-            content=b"\xff\xfe invalid bytes",
-            headers={"Content-Type": "application/json"},
-        )
-        assert resp.status_code == 400
+        assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------

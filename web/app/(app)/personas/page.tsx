@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
@@ -1200,19 +1200,6 @@ function CouncilConfigPanel() {
   const [localRounds, setLocalRounds] = useState<number | null>(null);
   const [modelDrafts, setModelDrafts] = useState<Record<string, string>>({});
 
-  useEffect(() => {
-    if (!personas.data) return;
-    setModelDrafts((current) => {
-      const next = { ...current };
-      for (const persona of personas.data) {
-        if (!(persona.persona_id in next)) {
-          next[persona.persona_id] = persona.model ?? "";
-        }
-      }
-      return next;
-    });
-  }, [personas.data]);
-
   const numRounds = localRounds ?? config.data?.num_rounds ?? 4;
   const maxRounds = config.data?.limits?.max_rounds ?? 12;
   const selectedIds = config.data?.selected_persona_ids ?? [];
@@ -1225,7 +1212,8 @@ function CouncilConfigPanel() {
   }
 
   function commitPersonaModel(personaId: string) {
-    const model = modelDrafts[personaId] ?? "";
+    const persona = personas.data?.find((item) => item.persona_id === personaId);
+    const model = modelDrafts[personaId] ?? persona?.model ?? "";
     updatePersonaModel.mutate({ personaId, model });
   }
 

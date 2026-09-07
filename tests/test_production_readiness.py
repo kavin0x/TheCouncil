@@ -30,11 +30,10 @@ class TestEnvironmentValidation:
         _validate_environment()
 
     def test_validate_environment_missing_secret_key(self, monkeypatch):
-        """Validation fails when API_SECRET_KEY missing."""
+        """API_SECRET_KEY is optional for local/self-hosted use."""
         monkeypatch.delenv("API_SECRET_KEY", raising=False)
         monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
-        with pytest.raises(RuntimeError, match="API_SECRET_KEY"):
-            _validate_environment()
+        _validate_environment()
 
     def test_validate_environment_missing_router_key(self, monkeypatch):
         """Validation fails when OPENROUTER_API_KEY missing."""
@@ -88,7 +87,7 @@ class TestAuthenticationValidation:
         """POST /runs requires Authorization header."""
         response = client.post("/runs", json={"question": "Test?"})
         assert response.status_code == 401
-        assert "authorization" in response.json()["detail"].lower()
+        assert "invalid credentials" in response.json()["detail"].lower()
 
     def test_create_run_rejects_invalid_token(self, client):
         """Invalid Bearer token is rejected."""

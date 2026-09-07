@@ -56,7 +56,6 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket,
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402  # type: ignore
 from fastapi.responses import JSONResponse  # noqa: E402  # type: ignore
 from fastmcp import FastMCP  # noqa: E402
-from fastmcp.server.dependencies import get_http_request  # noqa: E402
 from fastmcp.utilities.lifespan import combine_lifespans  # noqa: E402
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -76,10 +75,8 @@ from council.features.sandbox import (  # noqa: E402
     kill_desktop_sandbox,
     run_sandbox_task,
 )
-from council.db.session import get_engine, get_session_ctx, get_session_dep
-from council.db.models import ApiKey, User, Deliberation, Persona as PersonaModel
+from council.db.session import get_session_ctx, get_session_dep
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
@@ -541,15 +538,15 @@ async def get_current_user(
     """Return the authenticated user. Supports API_SECRET_KEY env var or stored API keys."""
     api_secret = os.getenv("API_SECRET_KEY", "")
     token = ""
-    
+
     if authorization and authorization.lower().startswith("bearer "):
         token = authorization[7:].strip()
-    
+
     # First try API_SECRET_KEY environment variable (dev mode)
     if api_secret and token:
         if hmac.compare_digest(token.encode(), api_secret.encode()):
             return AuthenticatedUser(user_id="local", auth_method="api_secret")
-    
+
     # Then try stored API keys in database
     if token and session:
         try:
@@ -572,11 +569,11 @@ async def get_current_user(
                 return AuthenticatedUser(user_id=owner_id, auth_method="api_key")
         except Exception:
             pass  # Fall through to error
-    
+
     # If we require auth and don't have valid credentials, fail
     if api_secret or token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-    
+
     # Allow unauthenticated access if no API_SECRET_KEY is set
     return AuthenticatedUser(user_id="local", auth_method="none")
 
@@ -1305,14 +1302,14 @@ async def create_api_key(
     session: Annotated[AsyncSession, Depends(get_session_dep)],
 ) -> ApiKeyCreatedResponse:
     """Create a new API key for programmatic access.
-    
+
     The plaintext key is returned ONLY in this response. Store it securely.
     """
     # Ensure user exists in database
     from sqlalchemy import text
-    
+
     owner_id = auth.owner_id
-    
+
     # Check if user exists, create if not
     result = await session.execute(text("SELECT id FROM users WHERE id = :id"), {"id": owner_id})
     if not result.first():
@@ -1321,14 +1318,14 @@ async def create_api_key(
             {"id": owner_id, "email": f"{owner_id}@council.local", "tier": "basic", "created_at": time.time()}
         )
         await session.commit()
-    
+
     # Generate new API key
     plaintext_key = _generate_api_key()
     key_hash = _hash_api_key(plaintext_key)
     key_prefix = plaintext_key[:12]
     key_id = str(uuid.uuid4())
     now = time.time()
-    
+
     # Store in database
     await session.execute(
         text("""
@@ -1347,7 +1344,7 @@ async def create_api_key(
         }
     )
     await session.commit()
-    
+
     return ApiKeyCreatedResponse(
         key_id=key_id,
         name=body.name,
@@ -1370,12 +1367,12 @@ async def list_api_keys(
 ) -> list[ApiKeyResponse]:
     """List all API keys for the authenticated user."""
     from sqlalchemy import text
-    
+
     result = await session.execute(
         text("SELECT id, name, key_prefix, created_at, last_used_at, is_active FROM api_keys WHERE owner_id = :owner_id ORDER BY created_at DESC"),
         {"owner_id": auth.owner_id}
     )
-    
+
     keys = []
     for row in result.all():
         key_id, name, key_prefix, created_at, last_used_at, is_active = row
@@ -1387,7 +1384,7 @@ async def list_api_keys(
             last_used_at=last_used_at,
             is_active=bool(is_active),
         ))
-    
+
     return keys
 
 
@@ -1403,16 +1400,16 @@ async def revoke_api_key(
 ) -> None:
     """Revoke (disable) an API key by marking it as inactive."""
     from sqlalchemy import text
-    
+
     # First verify the key belongs to this user
     result = await session.execute(
         text("SELECT id FROM api_keys WHERE id = :id AND owner_id = :owner_id"),
         {"id": key_id, "owner_id": auth.owner_id}
     )
-    
+
     if not result.first():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="API key not found")
-    
+
     # Mark as inactive
     await session.execute(
         text("UPDATE api_keys SET is_active = 0 WHERE id = :id"),
