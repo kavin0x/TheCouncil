@@ -1,4 +1,4 @@
-openai>=1.51.0
+openai>=3.8.0
 pyyaml>=6.0.2
 python-dotenv>=1.2.3
 pynput>=1.8.2
