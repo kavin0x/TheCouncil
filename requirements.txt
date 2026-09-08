@@ -35,7 +35,7 @@ typer[all]>=0.27.2
 
 # Production-ready enhancements
 alembic>=1.18.5
-slowapi>=0.1.9
+slowapi>=0.1.10
 python-multipart>=0.0.30
 structlog>=26.1.0
 python-json-logger>=4.1.0
