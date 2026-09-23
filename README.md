@@ -1,154 +1,68 @@
 # TheCouncil
 
-> Built at the [NEBULA:FOG:PROTOCOL](https://nebulafog.ai/) Hackathon!
+Self-hosted multi-agent debates — several LLM personas argue a decision, then you get a written resolution. Web UI, API, or CLI. Built for people who want structured disagreement on their own machine, not another chat tab.
 
-A multi-agent AI deliberation platform that orchestrates structured debates between LLM personas. Self-hosted, open-source, and built for extensibility.
+Started at the [NEBULA:FOG:PROTOCOL](https://nebulafog.ai/) hackathon.
+
+## Why I built this
+
+One model will happily agree with you. I wanted a way to force multiple viewpoints through a real debate — independent takes, rebuttals, private side-channels, then a vote — and keep the whole stack under my control. So I built TheCouncil: open-source, self-hosted, Docker-friendly.
+
+## Hosted chat vs this
+
+| | Typical multi-agent chat / SaaS | TheCouncil |
+|---|---|---|
+| Where it runs | Their servers | Your machine / your VPS |
+| Debate structure | Free-form or one-shot | Fixed multi-phase deliberation |
+| Output | Chat transcript | Decision rationale, action, dissent, top resolutions (JSON / Markdown) |
+| Limits | Usage caps / seats | Open-source tier: run as hard as your keys allow |
 
 ## Features
 
-- **Multi-Agent Debates**: Orchestrate 5-phase structured deliberations (Independent Takes → Cross-Debate → Private Messages → Resolution)
-- **Flexible Personas**: Use built-in canned personas, generate dynamically from the topic, or build custom personas via an LLM-powered questionnaire
-- **Deliberation Artifacts**: Structured output (decision rationale, recommended action, dissenting opinions, top-3 resolutions) available as JSON or Markdown
-- **Sandbox Execution**: Run code in Docker containers or stream a live VNC desktop for computer-use workflows
-- **Web Search**: Integrate external knowledge via Tavily API during deliberation
-- **Real-time Events**: WebSocket streams for live debate progress; falls back to in-process broadcast when Redis is unavailable
-- **MCP Integration**: Control TheCouncil from your IDE (Cursor, Claude Desktop) via the built-in FastMCP server at `/mcp`
-- **REST API**: Full HTTP API for programmatic access
-- **Self-Hosted**: Deploy on your own infrastructure with Docker or bare metal; no usage limits on the open-source tier
+**Debate**
+- 5-phase flow: independent takes → cross-debate → private messages → second cross-debate → resolution & vote
+- Built-in personas, topic-generated personas, or custom ones via a questionnaire
+- Structured artifacts: rationale, recommended action, dissenting opinions, top resolutions
 
-## Repository Layout
+**Integrations**
+- Web dashboard (Next.js)
+- REST API + WebSockets for live progress
+- MCP server at `/mcp` so you can drive debates from an IDE
+- Optional web search during deliberation
+- Optional Docker sandbox / VNC desktop for computer-use style work
+- CLI TUI if you don’t want the browser
 
-| Path                                 | Purpose                                                                 |
-| ------------------------------------ | ----------------------------------------------------------------------- |
-| `council/api/`                       | FastAPI REST API & WebSocket server                                     |
-| `council/core/`                      | Debate orchestration engine                                             |
-| `council/features/`                  | Sandbox, search, content guardrails                                     |
-| `council/db/`                        | Database models & migrations                                            |
-| `council/worker/`                    | Celery task queue integration                                           |
-| `council/features/personalities.py`  | Default built-in agent definitions (canned personas) and MBTI generator |
-| `web/`                               | Next.js 16 UI dashboard                                                 |
-| `tests/`                             | `pytest` backend suite                                                  |
-| `docker-compose.yml`                 | Full-stack local development                                            |
+**Ops**
+- Docker Compose for full stack (API, web, Postgres, Redis, worker)
+- Or bare Python + Node for local dev
+- SQLite by default; Postgres when you’re serious
 
-## Quick Start
+## Try it
 
-### Backend (Python)
-
-```bash
-python -m venv .venv
-source .venv/bin/activate      # or `venv\Scripts\activate` on Windows
-pip install -r requirements.txt
-cp .env.example .env            # populate with your API keys
-
-# Run the API
-uvicorn council.api.app:app --reload --reload-dir council --reload-dir tests
-# API available at http://localhost:8000
-# Interactive docs at http://localhost:8000/docs
-```
-
-### Frontend (Next.js)
-
-```bash
-cd web
-npm ci
-npm run dev
-# App available at http://localhost:3000
-```
-
-### Full Stack (Docker)
+**Docker (fastest):**
 
 ```bash
 docker-compose up -d
-# API: http://localhost:8000
-# Web: http://localhost:3000
-# PostgreSQL, Redis, and Celery worker also running
+# Web http://localhost:3000 · API http://localhost:8000
 ```
 
-## Configuration
-
-Copy `.env.example` to `.env` and populate these required variables:
-
-- `OPENROUTER_API_KEY` — LLM provider (OpenRouter; required)
-- `API_SECRET_KEY` — Bearer token for API auth (min 32 chars in production)
-- `DATABASE_URL` — Database connection string (default: `sqlite+aiosqlite:///./council.db`)
-  - **SQLite** (default): `sqlite+aiosqlite:///./council.db` — local file-based database
-  - **PostgreSQL**: `postgresql+asyncpg://user:password@host:5432/database`
-- `REDIS_URL` — Redis connection for pub/sub and job queue (required for worker mode)
-
-Optional integrations:
-
-- `TAVILY_API_KEY` — Enable web search in debates
-- `XAI_API_KEY` — Use native Grok API
-
-Behavior flags:
-
-- `CORS_ORIGINS` — Comma-separated allowed origins (default: `http://localhost:3000`; no wildcard)
-- `COUNCIL_DISABLE_WORKER=1` — Run Celery in-process (dev/test)
-- `COUNCIL_GUARDRAILS=0` — Disable content guardrails
-- `ALLOW_WEBSOCKET_QUERY_TOKEN=1` — Allow `?token=` fallback on WebSocket (insecure; off by default)
-- `HIDE_DOCS=1` — Disable `/docs`, `/redoc`, `/openapi.json`
-
-Frontend (`web/.env.local`):
-
-- `NEXT_PUBLIC_API_TOKEN` — Same value as `API_SECRET_KEY`; required if the backend enforces auth
-
-**API Key Management:**
-
-Users can generate API keys via the `/me/api-keys` endpoints for programmatic access:
-
-- `POST /me/api-keys` — Create a new API key
-- `GET /me/api-keys` — List all API keys
-- `DELETE /me/api-keys/{key_id}` — Revoke an API key
-
-Keys are stored securely as SHA256 hashes in the database and can be used as Bearer tokens.
-
-## Testing
-
-**Backend:**
+**Local:**
 
 ```bash
-pytest tests/ -q
-ruff check .
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env   # at least OPENROUTER_API_KEY + API_SECRET_KEY
+uvicorn council.api.app:app --reload --reload-dir council
+
+cd web && npm ci && npm run dev
 ```
 
-**Frontend:**
+More config flags live in `.env.example`. Contributing notes: [CONTRIBUTING.md](CONTRIBUTING.md). Security: [SECURITY.md](SECURITY.md).
 
-```bash
-cd web
-npm run test          # unit tests (vitest)
-npm run test:e2e      # end-to-end (playwright)
-npm run lint
-npm run typecheck
-```
+## Stack
 
-## Architecture
-
-**Core Debate Flow:**
-
-1. **Independent Takes** — Agents generate initial responses without knowledge of others
-2. **Cross-Debate I** — Sequential rebuttals with visibility into prior responses
-3. **Private Deliberation** — Direct point-to-point messages between agents
-4. **Cross-Debate II** — Final sequential round
-5. **Resolution & Vote** — Agents propose resolutions; voting determines winner; tie-breaker reruns until one resolution wins
-
-**Tech Stack:**
-
-- Backend: FastAPI + SQLAlchemy async + PostgreSQL
-- Frontend: Next.js 16 + React 19 + Tailwind CSS 4
-- Message Bus: Redis Streams (pub/sub for real-time events)
-- Job Queue: Celery + Redis (long-running debates)
-- Sandboxing: Docker (code execution + VNC desktop for computer-use)
-- LLM Providers: OpenRouter (primary), XAI Grok native API (optional)
-- IDE Integration: FastMCP server mounted at `/mcp`
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines, issue reporting, and pull request process.
-
-## Security
-
-For security vulnerabilities, see [SECURITY.md](SECURITY.md).
+FastAPI · SQLAlchemy · Next.js · Redis · Celery · Docker · OpenRouter (and optional native Grok) · FastMCP
 
 ## License
 
-Licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
+Apache License 2.0 — see [LICENSE](LICENSE).
