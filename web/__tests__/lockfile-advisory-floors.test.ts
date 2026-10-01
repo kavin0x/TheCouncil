@@ -53,9 +53,9 @@ describe("package-lock advisory floors", () => {
     expect(versions.length).toBeGreaterThan(0);
     for (const version of versions) {
       if (version.startsWith("1.")) {
-        expect(compareSemver(version, "1.1.18"), `brace-expansion@${version}`).toBeGreaterThanOrEqual(0);
+        expect(compareSemver(version, "1.1.21"), `brace-expansion@${version}`).toBeGreaterThanOrEqual(0);
       } else if (version.startsWith("5.")) {
-        expect(compareSemver(version, "5.0.9"), `brace-expansion@${version}`).toBeGreaterThanOrEqual(0);
+        expect(compareSemver(version, "5.0.12"), `brace-expansion@${version}`).toBeGreaterThanOrEqual(0);
       } else {
         throw new Error(`unexpected brace-expansion major: ${version}`);
       }
