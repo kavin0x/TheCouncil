@@ -6,6 +6,10 @@ const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
   {
+    // Pin React version so eslint-plugin-react skips detect path (ESLint 10 getFilename crash).
+    settings: { react: { version: "19.2.8" } },
+  },
+  {
     files: ["lib/auth.tsx"],
     rules: {
       // Reading localStorage after mount is intentional; snapshots cannot match SSR.
